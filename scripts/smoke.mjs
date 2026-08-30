@@ -56,6 +56,7 @@ const checks = [
   ['full window restores', report.restoredVisible === true],
   ['boss encounter rendered', report.arena?.bossSpawned === true],
   ['route runs while docked', !!report.route?.zoneId],
+  ['docked screens render', report.screensCaptured === 5],
 ];
 
 let failed = 0;

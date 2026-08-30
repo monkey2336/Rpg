@@ -201,6 +201,18 @@ async function smokeTest(): Promise<void> {
     await wait(1200);
     const back = await windows.full.webContents.capturePage();
     await writeFile(`${outDir}/full-docked.png`, back.toPNG());
+
+    // Walk the docked screens. Each pulls a different projection out of the
+    // catalog, so a capture of each is the cheapest real check that they bind.
+    for (const screen of ['hold', 'tech', 'ship', 'codex', 'settings']) {
+      await windows.full.webContents.executeJavaScript(
+        `document.querySelector('#nav button[data-screen="${screen}"]').click()`,
+      );
+      await wait(700);
+      const shot = await windows.full.webContents.capturePage();
+      await writeFile(`${outDir}/screen-${screen}.png`, shot.toPNG());
+    }
+    report.screensCaptured = 5;
     report.route = host.session.state.route;
     report.restoredVisible = windows.full.isVisible();
     report.ok = true;
