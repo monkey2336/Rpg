@@ -1,0 +1,25 @@
+{
+  "name": "cenotaph",
+  "productName": "Cenotaph",
+  "version": "0.1.0",
+  "description": "A dual-mode idle RPG: crew a salvage vessel across sun-scorched worlds. Tier 1 prototype.",
+  "private": true,
+  "type": "module",
+  "main": "dist/main/main.js",
+  "engines": { "node": ">=20" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
+    "watch": "tsc -p tsconfig.json --watch",
+    "start": "npm run build && electron .",
+    "test": "npm run build && node --test dist/test/*.test.js",
+    "sim": "npm run build && node dist/headless/cli.js",
+    "clean": "rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.2",
+    "typescript": "^5.7.2"
+  },
+  "optionalDependencies": {
+    "electron": "^33.2.1"
+  }
+}

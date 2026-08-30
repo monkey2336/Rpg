@@ -1,0 +1,304 @@
+/** Shared sim vocabulary. No platform types appear anywhere in src/sim. */
+
+export type DamageType = 'percussive' | 'solar' | 'caustic' | 'arc';
+export type DefenceLayer = 'shield' | 'armor' | 'health';
+export type Rarity = 'common' | 'refined' | 'marked' | 'relic' | 'sovereign';
+export type MaterialTier = 1 | 2 | 3 | 4 | 5;
+export type StatusKind = 'corrosion' | 'ignite' | 'disrupt' | 'stagger';
+
+/** Telegraph vocabulary — deliberately tiny, so players learn to read it once. */
+export type TelegraphShape = 'ring' | 'line' | 'cone' | 'pulse' | 'column';
+
+export interface Defences {
+  shield: number;
+  shieldMax: number;
+  /** Points per second once the delay has elapsed. */
+  shieldRegen: number;
+  /** Ticks without damage before regen resumes. */
+  shieldDelay: number;
+  shieldCooldown: number;
+  armor: number;
+  armorMax: number;
+  health: number;
+  healthMax: number;
+}
+
+export interface Status {
+  kind: StatusKind;
+  stacks: number;
+  ticksLeft: number;
+  /** Per-stack per-second effect: damage for DoTs, multiplier for debuffs. */
+  magnitude: number;
+  damageType: DamageType;
+}
+
+export type WeaponBehavior = 'hitscan' | 'projectile' | 'beam' | 'lob';
+
+export interface WeaponArchetype {
+  id: string;
+  name: string;
+  /** Player-facing family label; two archetypes in a family share a silhouette. */
+  family: string;
+  damageType: DamageType;
+  behavior: WeaponBehavior;
+  /** Damage per pellet before rarity/affix scaling. */
+  baseDamage: number;
+  pellets: number;
+  /** Ticks between shots at 40Hz. */
+  fireInterval: number;
+  magazine: number;
+  reloadTicks: number;
+  /** Radians of cone at the muzzle. */
+  spread: number;
+  /** Units per tick; ignored for hitscan/beam. */
+  projectileSpeed: number;
+  range: number;
+  critChance: number;
+  critMult: number;
+  /** Screen-space kick, in units. Presentation reads this; sim does not. */
+  recoil: number;
+  /** Frames of hitstop on a solid connect. Feel knob, tuned before content. */
+  hitstop: number;
+  /** Movement speed multiplier while wielded. Heavy guns are heavy. */
+  handling: number;
+  status?: { kind: StatusKind; chance: number; magnitude: number; durationTicks: number };
+  /** Unlocked in the Tier 1 prototype build. */
+  prototype: boolean;
+  flavor: string;
+}
+
+export interface Affix {
+  id: string;
+  label: string;
+  /** Multiplicative on the named derived stat unless `flat` is set. */
+  stat: 'damage' | 'fireRate' | 'magazine' | 'reload' | 'crit' | 'critMult' | 'handling' | 'statusChance';
+  value: number;
+  flat?: boolean;
+}
+
+export interface WeaponInstance {
+  uid: number;
+  archetypeId: string;
+  rarity: Rarity;
+  /** Item level: scales base damage against zone tiers. */
+  ilvl: number;
+  affixes: Affix[];
+  /** Set for hand-authored boss drops; suppresses procedural naming. */
+  signature?: string;
+  name: string;
+  locked: boolean;
+}
+
+export interface MaterialStack {
+  tier: MaterialTier;
+  amount: number;
+}
+
+/* ------------------------------- arena ---------------------------------- */
+
+export type Faction = 'player' | 'hostile';
+export type EntityKind = 'player' | 'grunt' | 'skirmisher' | 'burrower' | 'artillery' | 'elite' | 'boss';
+
+export interface Telegraph {
+  shape: TelegraphShape;
+  damageType: DamageType;
+  x: number;
+  y: number;
+  radius: number;
+  angle: number;
+  /** Ticks until it resolves. Counts down; presentation fills a bar from it. */
+  ticksLeft: number;
+  totalTicks: number;
+  damage: number;
+  id: number;
+}
+
+export interface WeakPoint {
+  id: string;
+  label: string;
+  /** Offset from entity origin. */
+  ox: number;
+  oy: number;
+  radius: number;
+  /** Damage multiplier when struck. */
+  multiplier: number;
+  /** Weak points can be shuttered between phases. */
+  exposed: boolean;
+  /** Some weak points have their own health and break off. */
+  health: number;
+  healthMax: number;
+  broken: boolean;
+}
+
+export interface Entity {
+  id: number;
+  kind: EntityKind;
+  faction: Faction;
+  defId: string;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  w: number;
+  h: number;
+  facing: 1 | -1;
+  def: Defences;
+  statuses: Status[];
+  /** AI blackboard. Contents are per-kind; always plain data so it serialises. */
+  ai: Record<string, number>;
+  weakPoints: WeakPoint[];
+  phase: number;
+  grounded: boolean;
+  /** Ticks of invulnerability remaining (dodge i-frames, phase transitions). */
+  iframes: number;
+  /** Ticks of stagger; entity cannot act. */
+  stunned: number;
+  dead: boolean;
+  /** Presentation-only cue counter; never read by sim logic. */
+  hitFlash: number;
+}
+
+export interface Projectile {
+  id: number;
+  ownerId: number;
+  faction: Faction;
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  damage: number;
+  damageType: DamageType;
+  radius: number;
+  ticksLeft: number;
+  /** Lobbed projectiles arc; hitscan traces resolve instantly and never appear here. */
+  gravity: number;
+  pierce: number;
+  status?: { kind: StatusKind; chance: number; magnitude: number; durationTicks: number };
+  crit: boolean;
+}
+
+export interface DamageEvent {
+  targetId: number;
+  amount: number;
+  layer: DefenceLayer;
+  damageType: DamageType;
+  crit: boolean;
+  weak: boolean;
+  x: number;
+  y: number;
+  tick: number;
+}
+
+/* ------------------------------ content --------------------------------- */
+
+export interface EnemyDef {
+  id: string;
+  name: string;
+  kind: EntityKind;
+  w: number;
+  h: number;
+  speed: number;
+  defences: Omit<Defences, 'shieldCooldown'>;
+  contactDamage: number;
+  contactType: DamageType;
+  /** Ticks between attacks. */
+  attackInterval: number;
+  attackDamage: number;
+  attackType: DamageType;
+  attackRange: number;
+  /** Expected effective HP contribution for route maths; derived, not authored. */
+  xp: number;
+  matDrop: number;
+  dataDrop: number;
+}
+
+export interface BossPhaseDef {
+  /** Phase begins when health fraction drops at or below this. */
+  atHealthFraction: number;
+  name: string;
+  /** What mechanically changes. Kept as data so the sim stays generic. */
+  speedMult: number;
+  attackIntervalMult: number;
+  armorMult: number;
+  shieldMult: number;
+  /** Weak points exposed during this phase. */
+  exposes: string[];
+  /** Adds spawned on entry. */
+  spawns: { defId: string; count: number }[];
+  /** Arena-wide damage over time, e.g. rising kiln heat in phase 3. */
+  arenaDps: number;
+  arenaDamageType: DamageType;
+  /** Telegraph patterns available this phase. */
+  patterns: string[];
+  briefing: string;
+}
+
+export interface BossDef {
+  id: string;
+  name: string;
+  epithet: string;
+  zoneId: string;
+  w: number;
+  h: number;
+  speed: number;
+  defences: Omit<Defences, 'shieldCooldown'>;
+  weakPoints: Omit<WeakPoint, 'exposed' | 'broken' | 'health'>[];
+  phases: BossPhaseDef[];
+  /** Hand-authored guaranteed drop. */
+  signatureDrop: string;
+  codexId: string;
+  matDrop: number;
+  dataDrop: number;
+}
+
+export interface ZoneDef {
+  id: string;
+  planetId: string;
+  name: string;
+  subtitle: string;
+  /** Orbital/derelict zones read differently and gate different materials. */
+  kind: 'surface' | 'orbital';
+  tier: MaterialTier;
+  recommendedPower: number;
+  enemyPool: string[];
+  elite: string;
+  bossId: string | null;
+  /** Boss gate: all conditions must be met before the boss can be engaged. */
+  gate: { kills: number; deposits: number; scans: number };
+  /** Per-cycle idle yields at 1x. Integers by construction — see route.ts. */
+  idle: { matPerCycle: number; dataPerCycle: number; cycleTicks: number; dropChance: number };
+  depositTier: MaterialTier;
+  accent: string;
+  flavor: string;
+}
+
+export interface PlanetDef {
+  id: string;
+  name: string;
+  epithet: string;
+  /** One saturated accent per planet, per the art direction. */
+  accent: string;
+  /** Fuel cost to reach from the previous node. */
+  fuel: number;
+  zones: string[];
+  flavor: string;
+}
+
+export interface TechNode {
+  id: string;
+  name: string;
+  cost: number;
+  requires: string[];
+  /** Applied in derive.ts. Kept declarative so the tree is data, not code. */
+  effect: { stat: string; value: number };
+  description: string;
+}
+
+export interface ItemBase {
+  id: string;
+  name: string;
+  archetypeId: string;
+  /** Rarity floor for this base. Sovereign bases only drop from bosses. */
+  minRarity: Rarity;
+  flavor: string;
+}
