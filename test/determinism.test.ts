@@ -7,7 +7,7 @@ import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 import { makeRng, nextInt, nextU32, rngAt } from '../src/sim/rng.js';
 import { hashState } from '../src/sim/hash.js';
-import { landInZone, newSession, tickSession, type Session } from '../src/sim/sim.js';
+import { landInZone, newSession, tickSession } from '../src/sim/sim.js';
 import { botInput } from '../src/headless/bot.js';
 import { atan2, cos, sin } from '../src/sim/trig.js';
 

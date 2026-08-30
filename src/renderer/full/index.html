@@ -1,0 +1,80 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'" />
+<title>Cenotaph</title>
+<link rel="stylesheet" href="style.css" />
+<div id="app">
+  <header id="topbar">
+    <div class="ident">
+      <div class="name">Cenotaph</div>
+      <div class="sub" id="ident-sub">Lantern-class salvager</div>
+    </div>
+    <div class="ticker"><div class="label">Slag</div><div class="value" id="t-mat1">0</div></div>
+    <div class="ticker"><div class="label">Ferrite</div><div class="value" id="t-mat2">0</div></div>
+    <div class="ticker"><div class="label">Data</div><div class="value data" id="t-data">0</div></div>
+    <div class="ticker"><div class="label">Hold</div><div class="value" id="t-hold">0/0</div></div>
+    <div class="ticker"><div class="label">Power</div><div class="value" id="t-power">0</div></div>
+    <div class="spacer"></div>
+    <div class="ticker" style="justify-content:center">
+      <button id="btn-dock">Dock to corner</button>
+    </div>
+  </header>
+
+  <main id="body">
+    <section id="stage">
+      <canvas id="view"></canvas>
+      <div id="hud">
+        <div class="objective">
+          <div class="line" id="obj-zone"></div>
+          <div class="line" id="obj-gate"></div>
+        </div>
+        <div class="bossbar" id="bossbar">
+          <div class="name" id="boss-name"></div>
+          <div class="track"><i id="boss-fill"></i></div>
+          <div class="pips" id="boss-pips"></div>
+          <div class="brief" id="boss-brief"></div>
+        </div>
+        <div class="vitals">
+          <div class="layerbar shield"><i id="v-shield"></i></div>
+          <div class="layerbar armor"><i id="v-armor"></i></div>
+          <div class="layerbar health"><i id="v-health"></i></div>
+          <div class="readout"><span id="v-text"></span><span id="v-status"></span></div>
+        </div>
+        <div class="weapon">
+          <div class="name" id="w-name">—</div>
+          <div class="ammo" id="w-ammo">—</div>
+          <div class="reload"><i id="w-reload" style="width:100%"></i></div>
+          <div class="slots" id="w-slots"></div>
+        </div>
+        <div class="overlay" id="overlay">
+          <div class="box">
+            <div class="big" id="ov-title"></div>
+            <div class="blurb" id="ov-text" style="margin:0;text-align:center"></div>
+            <div style="display:flex;gap:10px">
+              <button class="primary" id="ov-again">Land again</button>
+              <button id="ov-ship">Return to ship</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="screens">
+      <nav id="nav">
+        <button data-screen="map" class="active">System</button>
+        <button data-screen="route">Route</button>
+        <button data-screen="hold">Hold</button>
+        <button data-screen="tech">Tech</button>
+        <button data-screen="ship">Ship</button>
+        <button data-screen="codex">Codex</button>
+        <button data-screen="settings">Settings</button>
+      </nav>
+      <div id="screen"></div>
+    </section>
+  </main>
+
+  <footer id="bottom">
+    <span id="route-chip">No route</span>
+    <span id="feed"></span>
+    <span class="label" id="hint"></span>
+  </footer>
+</div>
+<script type="module" src="main.js"></script>

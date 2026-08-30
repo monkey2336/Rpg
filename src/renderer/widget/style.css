@@ -1,0 +1,117 @@
+/*
+ * The corner widget.
+ *
+ * Frameless and transparent, so the page paints its own panel and its own
+ * rounded corners. Everything is sized for 360x220 with a hover expansion to
+ * 480x320; nothing reflows between the two beyond what the extra rows show.
+ *
+ * Performance rules that live in this file: no blur filters, no box-shadows
+ * with large radii, no CSS animations that run continuously. The only moving
+ * things are the cycle bar and a two-frame pulse, both driven by inline width
+ * changes rather than keyframes, so an idle widget composites almost nothing.
+ */
+
+:root {
+  --void: #100d0a;
+  --panel: #171310;
+  --edge: #2b241c;
+  --ink: #e7ded0;
+  --dust: #8d8577;
+  --accent: #e8853a;
+  --danger: #c25a3a;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: transparent;
+  color: var(--ink);
+  font-family: "Inter", "Segoe UI", system-ui, sans-serif;
+  font-weight: 300;
+  overflow: hidden;
+  user-select: none;
+  cursor: default;
+}
+
+#shell {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: linear-gradient(180deg, #1b1611 0%, #100d0a 100%);
+  border: 1px solid var(--edge);
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+/* The whole top strip is the drag handle. Frameless windows need one. */
+#head {
+  -webkit-app-region: drag;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 9px 11px 8px;
+  border-bottom: 1px solid var(--edge);
+}
+#head .mark { width: 7px; height: 7px; background: var(--accent); flex: none; }
+#head .zone {
+  flex: 1;
+  font-size: 10px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+#head .lvl { font-size: 9px; letter-spacing: 0.16em; color: var(--dust); }
+#head button {
+  -webkit-app-region: no-drag;
+  background: transparent;
+  border: 1px solid var(--edge);
+  color: var(--dust);
+  font: inherit;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  padding: 3px 7px;
+  cursor: pointer;
+}
+#head button:hover { color: var(--ink); border-color: var(--dust); }
+
+/* Grows into whatever space the hover expansion adds, so neither size
+   leaves a dead gap. */
+#vignette { position: relative; flex: 1; min-height: 54px; border-bottom: 1px solid var(--edge); }
+#vignette canvas { display: block; width: 100%; height: 100%; }
+
+#tickers { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1px; background: var(--edge); }
+#tickers > div { background: var(--panel); padding: 8px 10px; }
+#tickers .k { font-size: 8px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--dust); }
+#tickers .v { font-size: 15px; font-variant-numeric: tabular-nums; line-height: 1.3; }
+#tickers .r { font-size: 9px; color: var(--dust); font-variant-numeric: tabular-nums; }
+
+#cycle { height: 3px; background: #0b0908; flex: none; }
+#cycle > i { display: block; height: 100%; background: var(--accent); width: 0; }
+
+#foot {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 11px;
+  font-size: 9px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--dust);
+  border-top: 1px solid var(--edge);
+  margin-top: auto;
+}
+#badge { color: var(--accent); }
+#badge.warn { color: var(--danger); }
+#badge.idle { color: var(--dust); }
+
+/* Extra detail appears only when the window is hovered and has grown. */
+#detail { display: none; padding: 0 11px 9px; }
+body.expanded #detail { display: block; }
+#detail .row { display: flex; justify-content: space-between; padding: 5px 0; border-bottom: 1px solid #211b15; font-size: 10px; }
+#detail .row span:first-child { color: var(--dust); letter-spacing: 0.1em; text-transform: uppercase; font-size: 9px; }
+#detail .row span:last-child { font-variant-numeric: tabular-nums; }

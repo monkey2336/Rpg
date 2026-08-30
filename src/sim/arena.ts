@@ -26,8 +26,8 @@ import { PATTERNS, getBoss } from './content/bosses.js';
 import { getEnemy } from './content/enemies.js';
 import { WEAPON_ARCHETYPES } from './content/weapons.js';
 import { getZone } from './content/zones.js';
-import { chance, makeRng, nextFloat, nextInt, nextRange, pick, type Rng } from './rng.js';
-import { atan2, clamp, cos, dist, sin, toward } from './trig.js';
+import { chance, makeRng, nextInt, nextRange, pick, type Rng } from './rng.js';
+import { atan2, clamp, cos, dist, sin } from './trig.js';
 import type {
   DamageType,
   Defences,
@@ -534,20 +534,45 @@ function entityHit(e: Entity, x: number, y: number): boolean {
   return x >= e.x - e.w / 2 && x <= e.x + e.w / 2 && y <= e.y && y >= e.y - e.h;
 }
 
+/**
+ * Traces a shot and reports where it lands.
+ *
+ * The subtlety is weak points: a body hit resolves at the point the ray enters
+ * the bounding box, which is almost never inside a weak-point circle sitting
+ * deeper in the model. So once the first body is found the trace keeps walking
+ * *through that same entity* looking for a weak point, and prefers it. Without
+ * this, weak points are unhittable and the whole knowledge-reward layer of the
+ * boss design is decorative.
+ */
 function traceHitscan(a: ArenaState, ox: number, oy: number, angle: number, range: number): { e: Entity; x: number; y: number } | null {
   const dx = cos(angle);
   const dy = sin(angle);
-  const step = 5;
+  const step = 4;
+  let body: { e: Entity; x: number; y: number } | null = null;
+  let bodyT = 0;
+
   for (let t = 8; t <= range; t += step) {
     const x = ox + dx * t;
     const y = oy + dy * t;
-    if (y > GROUND_Y + 4) return null;
+    if (y > GROUND_Y + 4) break;
+
+    if (body) {
+      // Inside a body already: only that entity's weak points can still win.
+      if (hitWeakPoint(body.e, x, y)) return { e: body.e, x, y };
+      if (t > bodyT + body.e.w + body.e.h) break;
+      continue;
+    }
     for (const e of a.entities) {
       if (e.faction !== 'hostile' || e.dead) continue;
-      if (entityHit(e, x, y)) return { e, x, y };
+      if (hitWeakPoint(e, x, y)) return { e, x, y };
+      if (entityHit(e, x, y)) {
+        body = { e, x, y };
+        bodyT = t;
+        break;
+      }
     }
   }
-  return null;
+  return body;
 }
 
 function fireWeapon(a: ArenaState, w: ResolvedWeapon, statusMult: number): void {

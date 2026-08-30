@@ -117,6 +117,26 @@ export function tickSession(session: Session, input: InputFrame, ticks = 1): Tic
   const out: TickResult = { events: [], notices: [], levelled: false };
   const d = derive(state);
 
+  // Docked with a route running is the widget-mode case, and it is by far the
+  // most common state this game is in. There is no arena to step, so the whole
+  // batch resolves in one call instead of `ticks` iterations. `advanceRoute`
+  // computes completed cycles arithmetically, so this is the same arithmetic
+  // the offline resolver uses and produces identical state — which is exactly
+  // what test/offline-parity.test.ts pins down.
+  if (!session.arena && ticks > 1) {
+    const plan = ensurePlan(session);
+    if (plan && state.route) {
+      const outcome = advanceRoute(state, plan, ticks);
+      if (outcome.autoScrapped > 0) {
+        out.notices.push(`Hold full — ${outcome.autoScrapped} scrapped for ${outcome.scrapMaterials}`);
+      }
+      if (outcome.levelled) out.levelled = true;
+    }
+    state.tick += ticks;
+    state.lastSeenMs += ticks * TICK_MS;
+    return out;
+  }
+
   for (let i = 0; i < ticks; i++) {
     state.tick += 1;
 

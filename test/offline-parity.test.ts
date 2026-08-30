@@ -119,3 +119,29 @@ describe('offline parity', () => {
     );
   });
 });
+
+describe('batched live ticking', () => {
+  it('the docked fast path matches tick-by-tick exactly', async () => {
+    // The widget-mode optimisation must not become a third economy: batching
+    // 40 ticks while docked has to equal stepping them one at a time.
+    const { newSession, tickSession } = await import('../src/sim/sim.js');
+    const { NEUTRAL_INPUT } = await import('../src/sim/arena.js');
+    const { assignRoute } = await import('../src/sim/route.js');
+    const { hashState } = await import('../src/sim/hash.js');
+
+    const make = () => {
+      const s = newSession(4242, 1_700_000_000_000);
+      s.state.zones['ochre-shelf']!.cleared = true;
+      assignRoute(s.state, 'ochre-shelf');
+      return s;
+    };
+
+    const stepped = make();
+    for (let i = 0; i < 60_000; i++) tickSession(stepped, NEUTRAL_INPUT, 1);
+
+    const batched = make();
+    for (let i = 0; i < 1_500; i++) tickSession(batched, NEUTRAL_INPUT, 40);
+
+    assert.equal(hashState(stepped.state), hashState(batched.state));
+  });
+});

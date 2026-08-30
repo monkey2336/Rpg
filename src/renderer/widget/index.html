@@ -1,0 +1,29 @@
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'none'" />
+<title>Cenotaph — route</title>
+<link rel="stylesheet" href="style.css" />
+<div id="shell">
+  <div id="head">
+    <span class="mark"></span>
+    <span class="zone" id="zone">No route</span>
+    <span class="lvl" id="lvl"></span>
+    <button id="restore">Open</button>
+  </div>
+  <div id="vignette"><canvas id="vig"></canvas></div>
+  <div id="cycle"><i id="cycle-fill"></i></div>
+  <div id="tickers">
+    <div><div class="k">Materials</div><div class="v" id="t-mat">0</div><div class="r" id="r-mat">—</div></div>
+    <div><div class="k">Data</div><div class="v" id="t-data">0</div><div class="r" id="r-data">—</div></div>
+    <div><div class="k">Hold</div><div class="v" id="t-hold">0/0</div><div class="r" id="r-drops">—</div></div>
+  </div>
+  <div id="detail">
+    <div class="row"><span>Cycles</span><span id="d-cycles">0</span></div>
+    <div class="row"><span>Items found</span><span id="d-drops">0</span></div>
+    <div class="row"><span>Status</span><span id="d-status">—</span></div>
+  </div>
+  <div id="foot">
+    <span id="badge" class="idle">Idle</span>
+    <span style="flex:1"></span>
+    <span id="tick">—</span>
+  </div>
+</div>
+<script type="module" src="widget.js"></script>
