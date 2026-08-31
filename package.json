@@ -6,7 +6,9 @@
   "private": true,
   "type": "module",
   "main": "dist/src/main/main.js",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "build": "tsc -p tsconfig.json && node scripts/copy-assets.mjs",
     "watch": "tsc -p tsconfig.json --watch",
@@ -18,9 +20,13 @@
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
+    "@types/three": "^0.170.0",
     "typescript": "^5.7.2"
   },
   "optionalDependencies": {
     "electron": "^33.2.1"
+  },
+  "dependencies": {
+    "three": "^0.170.0"
   }
 }

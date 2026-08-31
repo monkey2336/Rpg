@@ -10,31 +10,45 @@ what was asked for.
 
 ### 1.1 Combat perspective: third-person 3D, top-down, or 2.5D side-scroll?
 
-**2.5D side-scroll.**
+**Third-person 3D.** This one was decided twice, and the record is worth keeping
+because the second decision is the one that shipped.
 
-The art direction decides this, not the combat. The brief asks for hard sun, long
-shadows, brutalist mass, and "tiny player silhouette against enormous static
-geometry". That is a *side elevation*. It is the composition of every reference
-image the Dune films are cited for. In a side-on slice you get it for free from
-geometry you can draw with polygons; in third-person 3D you get it only when the
-camera happens to be somewhere flattering, which means either camera work you
-cannot afford or set dressing you cannot afford.
+**The original answer was 2.5D side-scroll**, on this reasoning: the art
+direction the brief asks for — hard sun, long shadows, brutalist mass, "tiny
+player silhouette against enormous static geometry" — *is* a side elevation, and
+in a side-on slice you get that composition for free from geometry you can draw
+with polygons. It also made telegraphs unambiguous, kept the headless sim
+trivially cheap, and needed no rigs, no animation blending, no navmesh.
 
-Three more things fall out of it:
+**That was overruled, and the game is now third-person 3D.** Which is the right
+call for a reason the original answer undersold: the brief's own reference points
+are *Star Citizen*, *Starfield* and *Borderlands*, and the fantasy is "ship as
+home, planets as places". A side-scroller can carry the art direction but it
+cannot carry the sense of *being somewhere* — you cannot look up at a kiln, you
+cannot be flanked, and a boss cannot walk over you. All three of those are now
+true, and the fight is better for it.
 
-- **Telegraph legibility.** The brief wants boss silhouettes readable at 200px
-  and a telegraph language consistent across the game. A ring, a line, a cone, a
-  pulse and a column are unambiguous in a side elevation. In third person they
-  need ground decals, height cues, and a camera that never occludes them.
-- **Headless tractability.** The sim carries 2D positions, so a six-hour
-  fast-forward is a few seconds of CPU and the encounter sim is a file, not a
-  subsystem. That is what makes offline parity provable rather than aspirational.
-- **Cost.** No rigs, no animation blending, no navmesh, no LODs. The prototype's
-  entire visual layer is one 600-line canvas module with no art assets in it.
+What the change actually cost, measured rather than guessed:
 
-What it gives up: verticality as a real axis, and the "walk up to something huge
-and look up" moment. Jump and dodge partly cover the first. The second is the
-genuine loss, and it is paid for by having a boss that reads at a glance.
+| | |
+|---|---|
+| Simulation files changed | 5 — `arena.ts`, `types.ts`, `snapshot.ts`, and the two content files carrying body geometry |
+| Economy files changed | **0** — `combat`, `loot`, `route`, `offline`, `derive`, `state`, `save`, `rng`, `numbers`, `hash`, `trig` are byte-identical |
+| Tests changed | 0 |
+| Tests passing after | 69 / 69, offline parity included |
+| Tests added since | 13, covering the new 3D geometry — 82 total |
+| Renderer | Rewritten — that was always going to happen |
+
+That table is the argument for locking the architecture first. Geometry lives in
+the arena; the economy is dimensionless, so a change of *dimension* could not
+reach it. The offline-parity guarantee — the thing the brief calls the single
+most important technical decision — never came under threat, because there was
+no code path by which it could.
+
+What the 3D version keeps from the original reasoning: telegraphs are still a
+fixed five-shape vocabulary, now drawn as literal decals on the ground, which is
+if anything more readable than the side-on version. And the sim is still cheap —
+1.4µs per tick deployed, so a six-hour fast-forward is still seconds.
 
 ### 1.2 Is idle progression a reduced-rate version of active play, or a distinct activity set?
 
@@ -157,11 +171,18 @@ decide the stack, and they point the same way:
   easy to lose inside an engine, where the temptation to reach for a node, a
   signal, or a MonoBehaviour is constant.
 
-**What it costs.** A 2.5D side-scroller drawn on a canvas is well inside what
-this stack does comfortably, but the ceiling is real: no built-in physics,
-particles, animation tooling, audio middleware or asset pipeline, and a ~150MB
-install. Electron is also the reason the widget's performance budget needs care —
+**What it costs.** Third-person 3D on WebGL through Three.js is comfortable at
+this fidelity — a shadow-mapped sun, fogged depth, a few hundred primitives and
+pooled effects — but the ceiling is closer than it was when this was a
+side-scroller: no built-in physics, no animation tooling, no audio middleware, no
+asset pipeline, and a ~150MB install. The moment this game wants skeletal
+animation, authored models, or a real particle editor, the stack is the thing in
+the way. Electron is also why the widget's performance budget needs care —
 Chromium's compositor is the cost, not the simulation.
+
+Three.js is vendored as a local file rather than pulled from a CDN, because the
+renderer is a `file://` page under a `script-src 'self'` policy and the game must
+work with no network at all.
 
 **The port path, if the ceiling is reached.** The seam is already cut. `src/sim`
 is pure data and arithmetic with a documented determinism rule (integer ops,

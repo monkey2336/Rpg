@@ -21,6 +21,9 @@
   <main id="body">
     <section id="stage">
       <canvas id="view"></canvas>
+      <canvas id="overlay-canvas"></canvas>
+      <div id="damage-vignette"></div>
+      <div id="lock-hint"><span>Click to take the controls</span></div>
       <div id="hud">
         <div class="objective">
           <div class="line" id="obj-zone"></div>
@@ -31,6 +34,7 @@
           <div class="track"><i id="boss-fill"></i></div>
           <div class="pips" id="boss-pips"></div>
           <div class="brief" id="boss-brief"></div>
+          <div class="vent" id="boss-vent">Vents open</div>
         </div>
         <div class="vitals">
           <div class="layerbar shield"><i id="v-shield"></i></div>

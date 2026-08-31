@@ -96,17 +96,32 @@ export interface MaterialStack {
 
 /* ------------------------------- arena ---------------------------------- */
 
+/**
+ * Arena space is genuinely three-dimensional.
+ *
+ * Convention, and it is worth stating once: **y is up and positive**, the ground
+ * is y = 0, and x/z is the ground plane. `yaw` is the heading in that plane,
+ * measured with `atan2(dz, dx)`, so yaw 0 faces +x. This matches the renderer's
+ * convention exactly, which removes a whole class of sign-flip bugs at the
+ * sim/presentation boundary.
+ *
+ * Bodies are upright cylinders: `radius` in the ground plane, `height` up from
+ * the entity's feet. Cheap to test, and correct enough that a shot which looks
+ * like it should connect does.
+ */
 export type Faction = 'player' | 'hostile';
 export type EntityKind = 'player' | 'grunt' | 'skirmisher' | 'burrower' | 'artillery' | 'elite' | 'boss';
 
 export interface Telegraph {
   shape: TelegraphShape;
   damageType: DamageType;
+  /** Ground-plane origin. */
   x: number;
-  y: number;
+  z: number;
   radius: number;
-  angle: number;
-  /** Ticks until it resolves. Counts down; presentation fills a bar from it. */
+  /** Heading for directional shapes (line, cone). */
+  yaw: number;
+  /** Ticks until it resolves. Counts down; presentation fills from it. */
   ticksLeft: number;
   totalTicks: number;
   damage: number;
@@ -116,9 +131,10 @@ export interface Telegraph {
 export interface WeakPoint {
   id: string;
   label: string;
-  /** Offset from entity origin. */
+  /** Local-space offset: ox forward along the body's yaw, oz to its left, oy up. */
   ox: number;
   oy: number;
+  oz: number;
   radius: number;
   /** Damage multiplier when struck. */
   multiplier: number;
@@ -137,11 +153,13 @@ export interface Entity {
   defId: string;
   x: number;
   y: number;
+  z: number;
   vx: number;
   vy: number;
-  w: number;
-  h: number;
-  facing: 1 | -1;
+  vz: number;
+  radius: number;
+  height: number;
+  yaw: number;
   def: Defences;
   statuses: Status[];
   /** AI blackboard. Contents are per-kind; always plain data so it serialises. */
@@ -154,8 +172,10 @@ export interface Entity {
   /** Ticks of stagger; entity cannot act. */
   stunned: number;
   dead: boolean;
-  /** Presentation-only cue counter; never read by sim logic. */
+  /** Presentation-only cue counters; never read by sim logic. */
   hitFlash: number;
+  /** Distance travelled on the ground, for driving walk cycles in the renderer. */
+  gait: number;
 }
 
 export interface Projectile {
@@ -164,8 +184,10 @@ export interface Projectile {
   faction: Faction;
   x: number;
   y: number;
+  z: number;
   vx: number;
   vy: number;
+  vz: number;
   damage: number;
   damageType: DamageType;
   radius: number;
@@ -186,6 +208,7 @@ export interface DamageEvent {
   weak: boolean;
   x: number;
   y: number;
+  z: number;
   tick: number;
 }
 
@@ -195,8 +218,8 @@ export interface EnemyDef {
   id: string;
   name: string;
   kind: EntityKind;
-  w: number;
-  h: number;
+  radius: number;
+  height: number;
   speed: number;
   defences: Omit<Defences, 'shieldCooldown'>;
   contactDamage: number;
@@ -238,8 +261,8 @@ export interface BossDef {
   name: string;
   epithet: string;
   zoneId: string;
-  w: number;
-  h: number;
+  radius: number;
+  height: number;
   speed: number;
   defences: Omit<Defences, 'shieldCooldown'>;
   weakPoints: Omit<WeakPoint, 'exposed' | 'broken' | 'health'>[];

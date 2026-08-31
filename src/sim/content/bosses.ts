@@ -21,8 +21,8 @@ export const BOSS_DEFS: readonly BossDef[] = [
     name: 'The Kiln Warden',
     epithet: 'Third of the Shelf Kilns, still tending a furnace that went out an age ago',
     zoneId: 'ochre-shelf',
-    w: 190,
-    h: 150,
+    radius: 92,
+    height: 150,
     speed: 0.85,
     defences: {
       shield: 1800,
@@ -34,10 +34,14 @@ export const BOSS_DEFS: readonly BossDef[] = [
       health: 5200,
       healthMax: 5200,
     },
+    // Local space: +ox is forward along its heading, +oz is to its left, oy is
+    // height above its feet. The three are deliberately spread around the body
+    // so each phase asks the player to stand somewhere different: the vents are
+    // on its flanks, the ganglion is on its back, the core is under its chest.
     weakPoints: [
-      { id: 'vents', label: 'Thermal Vents', ox: -44, oy: -38, radius: 26, multiplier: 2.6, healthMax: 900 },
-      { id: 'ganglion', label: 'Spine Ganglion', ox: 10, oy: -66, radius: 20, multiplier: 3.2, healthMax: 1100 },
-      { id: 'aperture', label: 'Core Aperture', ox: 46, oy: -20, radius: 30, multiplier: 4.0, healthMax: 1600 },
+      { id: 'vents', label: 'Thermal Vents', ox: -6, oy: 104, oz: 74, radius: 26, multiplier: 2.6, healthMax: 900 },
+      { id: 'ganglion', label: 'Spine Ganglion', ox: -78, oy: 122, oz: 0, radius: 22, multiplier: 3.2, healthMax: 1100 },
+      { id: 'aperture', label: 'Core Aperture', ox: 58, oy: 74, oz: 0, radius: 30, multiplier: 4.0, healthMax: 1600 },
     ],
     phases: [
       {

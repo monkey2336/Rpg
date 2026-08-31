@@ -21,8 +21,10 @@ await mkdir(outDir, { recursive: true });
 
 const electron = join(root, 'node_modules', '.bin', 'electron');
 const headless = process.platform === 'linux' && !process.env.DISPLAY;
+// SwiftShader is the only GL available on a headless box, and recent Chromium
+// requires an explicit opt-in before it will back WebGL with it.
 const [cmd, args] = headless
-  ? ['xvfb-run', ['-a', electron, '.', '--no-sandbox']]
+  ? ['xvfb-run', ['-a', electron, '.', '--no-sandbox', '--enable-unsafe-swiftshader']]
   : [electron, ['.']];
 
 console.log(`running shell smoke test${headless ? ' under xvfb' : ''}...`);

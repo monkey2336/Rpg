@@ -48,6 +48,8 @@ export class SimHost {
   private lastAutosave = 0;
   private lastWidgetPush = 0;
   private notices: string[] = [];
+  /** Events from the tick just run, handed to the full renderer once. */
+  private pendingEvents: import('../sim/arena.js').ArenaEvent[] = [];
   private handlers: HostEvents = {};
   private saving = false;
   private dirty = false;
@@ -129,9 +131,11 @@ export class SimHost {
       if (this.notices.length > 40) this.notices = this.notices.slice(-40);
       this.dirty = true;
     }
+    this.pendingEvents = result.events;
     if (result.events.length > 0) this.dirty = true;
 
     this.publish();
+    this.pendingEvents = [];
     this.reschedule();
     void this.maybeAutosave();
   }
@@ -144,7 +148,7 @@ export class SimHost {
   private publish(): void {
     const now = Date.now();
     if (this.handlers.onFull) {
-      this.handlers.onFull(buildFullSnapshot(this.session, this.notices.slice(-6)));
+      this.handlers.onFull(buildFullSnapshot(this.session, this.notices.slice(-6), this.pendingEvents));
     }
     if (this.handlers.onWidget) {
       const fps = this.session.state.settings.widgetFps;

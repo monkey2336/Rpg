@@ -18,3 +18,11 @@ for (const [from, to] of pairs) {
   await mkdir(dirname(join(root, to)), { recursive: true });
   await cp(join(root, from), join(root, to));
 }
+
+// Vendor Three.js next to the renderer. No bundler, file:// pages, and a
+// `script-src 'self'` CSP mean the library must be a real local file.
+await mkdir(join(root, 'dist/src/renderer/vendor'), { recursive: true });
+await cp(
+  join(root, 'node_modules/three/build/three.module.js'),
+  join(root, 'dist/src/renderer/vendor/three.module.js'),
+);

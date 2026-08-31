@@ -4,31 +4,47 @@
  * The renderer owns no game state. It samples the keyboard and mouse into an
  * input frame, ships it to the host, and draws whatever snapshot comes back.
  * Everything visible here is derived; nothing here is authoritative.
+ *
+ * Aiming is camera-driven, as a third-person shooter should be: the reticle is
+ * dead centre and the shot goes where the camera looks, so `aimYaw` and
+ * `aimPitch` are simply the camera's own angles. The sim resolves movement
+ * against `camYaw`, which is why the camera's heading is part of the input
+ * frame rather than something presentation keeps to itself.
  */
 import { formatNumber } from '../../sim/numbers.js';
 import type { FullSnapshot } from '../../sim/snapshot.js';
 import { api } from './api.js';
 import { renderScreen, type ScreenId } from './screens.js';
-import { ArenaView } from './view.js';
+import { Scene3D } from './scene.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.querySelector<T>(sel)!;
 
 const canvas = $<HTMLCanvasElement>('#view');
-const view = new ArenaView(canvas);
+const overlay = $<HTMLCanvasElement>('#overlay-canvas');
+const scene = new Scene3D(canvas, overlay);
 
 let snapshot: FullSnapshot | null = null;
 let catalog: Record<string, any> = {};
 let content: Record<string, any> = {};
 let screen: ScreenId = 'map';
 let feed: string[] = [];
+let pointerLocked = false;
 
 /* --------------------------------- input --------------------------------- */
 
 const held = new Set<string>();
-const pointer = { x: 0, y: 0 };
+const camera = { yaw: -Math.PI / 2, pitch: 0.22 };
 let firing = false;
 
+const MOUSE_SENS = 0.0024;
+const PITCH_MIN = -0.35;
+const PITCH_MAX = 1.05;
+
 const keyMap: Record<string, string> = {
+  KeyW: 'fwd',
+  ArrowUp: 'fwd',
+  KeyS: 'back',
+  ArrowDown: 'back',
   KeyA: 'left',
   ArrowLeft: 'left',
   KeyD: 'right',
@@ -63,45 +79,42 @@ window.addEventListener('blur', () => {
   firing = false;
 });
 
-canvas.addEventListener('mousedown', (e) => {
-  if (e.button === 0) firing = true;
+// Pointer lock is what makes mouse-look feel like a game rather than a canvas.
+canvas.addEventListener('click', () => {
+  if (!pointerLocked && snapshot?.mode === 'zone') void canvas.requestPointerLock();
 });
-window.addEventListener('mouseup', () => {
-  firing = false;
+document.addEventListener('pointerlockchange', () => {
+  pointerLocked = document.pointerLockElement === canvas;
+  $('#lock-hint').classList.toggle('on', !pointerLocked && snapshot?.mode === 'zone');
 });
-canvas.addEventListener('mousemove', (e) => {
-  const rect = canvas.getBoundingClientRect();
-  pointer.x = e.clientX - rect.left;
-  pointer.y = e.clientY - rect.top;
+window.addEventListener('mousemove', (e) => {
+  if (!pointerLocked) return;
+  camera.yaw += e.movementX * MOUSE_SENS;
+  camera.pitch = Math.max(PITCH_MIN, Math.min(PITCH_MAX, camera.pitch + e.movementY * MOUSE_SENS));
 });
-
-/** Converts the pointer to world coordinates using the same layout the view draws with. */
-function aimWorld(): { x: number; y: number } {
-  const rect = canvas.getBoundingClientRect();
-  // Must track the view's live span, or aiming drifts the moment the camera
-  // pulls back for a boss.
-  const scale = rect.width / view.currentSpan();
-  const groundY = rect.height * 0.72;
-  const px = snapshot?.arena?.player.x ?? 0;
-  return {
-    x: px + (pointer.x - rect.width / 2) / scale,
-    y: (pointer.y - groundY) / scale,
-  };
-}
+window.addEventListener('mousedown', (e) => {
+  if (e.button === 0 && pointerLocked) firing = true;
+});
+window.addEventListener('mouseup', (e) => {
+  if (e.button === 0) firing = false;
+});
 
 /** One input frame per animation frame; the host resamples it per sim tick. */
 function pushInput(): void {
   if (!snapshot || snapshot.mode !== 'zone') return;
-  const aim = aimWorld();
   api.sendInput({
     moveX: (held.has('right') ? 1 : 0) - (held.has('left') ? 1 : 0),
+    moveZ: (held.has('fwd') ? 1 : 0) - (held.has('back') ? 1 : 0),
+    camYaw: camera.yaw,
     jump: held.has('jump'),
     dodge: held.has('dodge'),
-    fire: firing,
+    fire: firing && pointerLocked,
     reload: held.has('reload'),
     interact: held.has('interact'),
-    aimX: aim.x,
-    aimY: aim.y,
+    // Third person: the shot goes where the camera looks. Pitch is negated
+    // because screen-down is a positive mouse delta but a negative world pitch.
+    aimYaw: camera.yaw,
+    aimPitch: -camera.pitch,
     swapSlot: -1,
     summonBoss: held.has('summon'),
   });
@@ -124,6 +137,9 @@ async function boot(): Promise<void> {
   for (const w of load?.warnings ?? []) note(`Save note: ${w}`);
 
   api.onFull((s) => {
+    // Every snapshot carries the tick's events; they become muzzle flashes,
+    // tracers, sparks and floating numbers here and nowhere else.
+    if (s.events && s.events.length > 0) scene.consumeEvents(s.events, s.arena);
     snapshot = s;
   });
   api.onNotice(note);
@@ -145,6 +161,7 @@ async function boot(): Promise<void> {
 }
 
 async function command(name: string, payload: Record<string, unknown> = {}): Promise<void> {
+  if (name === 'return-to-ship' && document.pointerLockElement) document.exitPointerLock();
   const result = await api.command(name, payload);
   if (result.message) note(result.message);
   await refresh();
@@ -173,9 +190,15 @@ function note(text: string): void {
 
 let lastScreenPaint = 0;
 let lastMode = '';
+let lastFrame = performance.now();
 
 function frame(now: number): void {
   requestAnimationFrame(frame);
+  // Effects and camera easing run on sim-tick units so they stay in step with
+  // the simulation regardless of display refresh rate.
+  const dtTicks = Math.min(4, ((now - lastFrame) / 25) || 1);
+  lastFrame = now;
+
   pushInput();
   if (!snapshot) return;
 
@@ -185,17 +208,18 @@ function frame(now: number): void {
 
   if (snapshot.mode !== lastMode) {
     lastMode = snapshot.mode;
+    if (!deployed && document.pointerLockElement) document.exitPointerLock();
+    $('#lock-hint').classList.toggle('on', deployed && !pointerLocked);
     void refresh();
   }
 
   if (deployed) {
-    view.draw(snapshot.arena);
+    scene.render(snapshot.arena, camera, dtTicks, now);
     paintHud(snapshot);
   } else if (now - lastScreenPaint > 500) {
     // Docked screens are static markup; repainting them at 60fps would be
     // pointless work. Half a second is plenty for a resource ticker.
     lastScreenPaint = now;
-    paintTop(snapshot);
     void refresh();
   }
   paintTop(snapshot);
@@ -218,7 +242,7 @@ function paintBottom(s: FullSnapshot): void {
   $('#route-chip').textContent = r.routeZone ? `Route: ${r.routeZoneName} · ${r.cycles} cycles` : 'No route';
   $('#hint').innerHTML =
     s.mode === 'zone'
-      ? '<span class="kbd">A D</span> move <span class="kbd">Space</span> jump <span class="kbd">Shift</span> dodge <span class="kbd">E</span> channel <span class="kbd">R</span> reload <span class="kbd">F</span> beacon <span class="kbd">Esc</span> dock'
+      ? '<span class="kbd">W A S D</span> move <span class="kbd">Mouse</span> aim <span class="kbd">Space</span> jump <span class="kbd">Shift</span> dodge <span class="kbd">E</span> channel <span class="kbd">R</span> reload <span class="kbd">F</span> beacon <span class="kbd">Esc</span> dock'
       : '<span class="kbd">`</span> dock to corner';
 }
 
@@ -257,12 +281,18 @@ function paintHud(s: FullSnapshot): void {
       (_, i) => `<span class="pip ${i <= a.boss!.phase ? 'on' : ''}"></span>`,
     ).join('');
     $('#boss-brief').textContent = a.boss.briefing;
+    $('#boss-vent').classList.toggle('on', a.boss.venting);
   }
 
-  const overlay = $('#overlay');
+  // A red bloom at the edges when badly hurt, instead of a number to read.
+  const hurt = 1 - p.health / Math.max(1, p.healthMax);
+  $('#damage-vignette').style.opacity = String(Math.max(0, hurt - 0.35) * 1.4);
+
+  const ovl = $('#overlay');
   const done = a.outcome !== 'running';
-  overlay.classList.toggle('on', done);
+  ovl.classList.toggle('on', done);
   if (done) {
+    if (document.pointerLockElement) document.exitPointerLock();
     $('#ov-title').textContent = a.outcome === 'cleared' ? 'Zone cleared' : 'Downed';
     $('#ov-text').textContent =
       a.outcome === 'cleared'

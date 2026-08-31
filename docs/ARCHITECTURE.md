@@ -39,6 +39,51 @@ which is the entire write surface of the game.
 
 ---
 
+## 1b. Arena space
+
+The arena is genuinely three-dimensional, and the convention is worth stating
+once because it removes a whole class of sign-flip bugs at the sim/presentation
+boundary:
+
+- **y is up and positive.** The ground is `y = 0`.
+- **x/z is the ground plane**, and the arena is a disc of radius 620 — a bounded
+  corridor invites both actors to crab-walk into a corner, and a disc has none.
+- **`yaw` is a heading measured with `atan2(dz, dx)`**, so yaw 0 faces +x.
+- **Bodies are upright cylinders**: `radius` in the ground plane, `height` up
+  from the feet. Cheap to test, and accurate enough that a shot which looks like
+  it should connect does.
+- **Weak-point offsets are local**: `ox` forward along the body's yaw, `oz` to
+  its left, `oy` up from its feet, rotated into world space by `weakPointPos`.
+
+Movement input is **camera-relative**, which is why `camYaw` is part of the input
+frame rather than something presentation keeps to itself: the sim resolves
+"forward" against the camera's heading, exactly as the player experiences it. The
+headless bot drives this same path — it points a notional camera where it wants
+to go and pushes forward — so the reference policy exercises the real code rather
+than a shortcut.
+
+### What the move to 3D proved
+
+This project shipped a 2.5D side-scrolling arena first and then converted it to
+third-person 3D. That conversion is the strongest evidence available that the
+architecture was worth locking before content:
+
+| | |
+|---|---|
+| Simulation files changed | 5 (`arena.ts`, `types.ts`, `snapshot.ts`, two content files) |
+| Economy files changed | **0** |
+| Tests changed | 0 |
+| Tests passing after | 69 / 69 |
+| Tests added since | 13, covering the new 3D geometry — 82 total |
+
+`combat.ts`, `loot.ts`, `route.ts`, `offline.ts`, `derive.ts`, `state.ts`,
+`save.ts`, `rng.ts`, `numbers.ts`, `hash.ts` and `trig.ts` are byte-identical
+across the change. Geometry lives in the arena; the economy is dimensionless, so
+a change of dimension could not reach it. The offline-parity guarantee never came
+under threat because there is no code path by which it could.
+
+---
+
 ## 2. Determinism
 
 Same seed plus same inputs must give the same game, on every machine, forever.
@@ -159,6 +204,35 @@ uses and the process sleeps between wakes. `npm run sim -- bench` measures
 > Enforced by the `batched live ticking` case in `test/offline-parity.test.ts`:
 > stepping 60,000 ticks one at a time and batching them 40 at a time reach the
 > same state hash. The optimisation cannot become a third economy.
+
+---
+
+## 5b. Rendering
+
+The 3D view is Three.js over WebGL2, vendored as a local file (`src/renderer/vendor/`)
+because the renderer is a `file://` page under a `script-src 'self'` policy and
+the game must run with no network. There is no bundler: the renderer is plain ES
+modules, which keeps cold start cheap and the build a single `tsc` invocation.
+
+Three rules keep it honest:
+
+1. **It cannot reach the sim.** It reads an `ArenaSnapshot` and draws. The only
+   state it keeps between frames is visual: camera easing, shake, effect pools,
+   and a map of live meshes keyed by entity id.
+2. **The sim says what happened; presentation decides how it feels.** Each
+   snapshot carries that tick's `ArenaEvent[]`. Muzzle flash, tracer, spark
+   spray, floating damage number, hitstop and shake are all derived from that
+   list in `Scene3D.consumeEvents` and nowhere else.
+3. **No art assets.** Every mesh is built from primitives at runtime and every
+   environment layout is generated from a hash of the zone id. The look is
+   carried by lighting — one low, hard, shadow-mapped sun, a cool sky fill, a
+   warm ground bounce, a dim camera-riding fill so silhouettes are not black
+   cut-outs, and exponential fog for aerial perspective.
+
+Effects are pooled into a fixed, small number of draw calls: one `LineSegments`
+for every tracer, one `Points` for every spark, one `Points` for all the dust,
+and a single reused muzzle light. Damage numbers and the reticle are drawn on a
+2D canvas layered over the WebGL one, so they stay crisp at any distance.
 
 ---
 

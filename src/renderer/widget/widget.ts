@@ -105,7 +105,7 @@ function paintVignette(s: WidgetSnapshot): void {
   const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
-  if (canvas.width !== Math.floor(w * dpr)) {
+  if (canvas.width !== Math.floor(w * dpr) || canvas.height !== Math.floor(h * dpr)) {
     canvas.width = Math.floor(w * dpr);
     canvas.height = Math.floor(h * dpr);
   }
@@ -113,43 +113,83 @@ function paintVignette(s: WidgetSnapshot): void {
   const H = canvas.height;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
 
-  const sky = ctx.createLinearGradient(0, 0, 0, H);
-  sky.addColorStop(0, '#100c09');
-  sky.addColorStop(0.62, '#2a1d14');
-  sky.addColorStop(1, s.accent);
+  const groundY = H * 0.82;
+
+  // Sky: the same dusk the game renders, flattened into two stops.
+  const sky = ctx.createLinearGradient(0, 0, 0, groundY);
+  sky.addColorStop(0, '#141c2b');
+  sky.addColorStop(0.52, '#6d3a1c');
+  sky.addColorStop(1, '#e8a86a');
   ctx.fillStyle = sky;
-  ctx.fillRect(0, 0, W, H);
+  ctx.fillRect(0, 0, W, groundY);
 
-  const groundY = H * 0.86;
-  // Two kiln masses, offset by the cycle so the scene creeps as the route runs.
-  const drift = (s.cycleProgress * W * 0.5) % (W * 0.5);
-  ctx.fillStyle = '#0c0907';
-  for (let i = -1; i < 3; i++) {
-    const x = i * W * 0.5 - drift;
-    const bw = W * 0.16;
-    const bh = H * (0.4 + ((i + 3) % 3) * 0.16);
-    ctx.beginPath();
-    ctx.moveTo(x, groundY);
-    ctx.lineTo(x + bw * 0.18, groundY - bh);
-    ctx.lineTo(x + bw * 0.82, groundY - bh);
-    ctx.lineTo(x + bw, groundY);
-    ctx.closePath();
-    ctx.fill();
+  // Sun, low, with a wide warm halo — the light source the scene implies.
+  const sunX = W * 0.72;
+  const sunY = groundY - H * 0.14;
+  const halo = ctx.createRadialGradient(sunX, sunY, 0, sunX, sunY, H * 0.9);
+  halo.addColorStop(0, hexA(s.accent, 0.55));
+  halo.addColorStop(1, hexA(s.accent, 0));
+  ctx.fillStyle = halo;
+  ctx.fillRect(0, 0, W, groundY);
+  ctx.fillStyle = '#fff0d4';
+  ctx.beginPath();
+  ctx.arc(sunX, sunY, H * 0.05, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Kilns: tapered, parallaxed off cycle progress so the scene creeps as the
+  // route runs. Two layers, the far one lighter, for a little aerial depth.
+  const drift = s.cycleProgress * W * 0.35;
+  for (const [layer, color, scale] of [[0.45, '#3a2718', 0.7], [1, '#150f0a', 1]] as const) {
+    for (let i = -1; i < 5; i++) {
+      const seedX = i * W * 0.31;
+      const x = ((seedX - drift * layer) % (W * 1.55) + W * 1.55) % (W * 1.55) - W * 0.28;
+      const bw = W * (0.05 + ((i + 5) % 3) * 0.018) * scale;
+      const bh = H * (0.3 + ((i + 7) % 4) * 0.11) * scale;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(x - bw, groundY);
+      ctx.lineTo(x - bw * 0.68, groundY - bh);
+      ctx.lineTo(x + bw * 0.68, groundY - bh);
+      ctx.lineTo(x + bw, groundY);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillRect(x - bw * 0.14, groundY - bh - H * 0.1 * scale, bw * 0.28, H * 0.1 * scale);
+    }
   }
-  ctx.fillStyle = '#0a0806';
-  ctx.fillRect(0, groundY, W, H - groundY);
-  ctx.fillStyle = 'rgba(240,220,190,0.14)';
-  ctx.fillRect(0, groundY, W, 1);
 
-  // A single silhouette on the ground: the ship, small, doing the work.
-  const px = W * 0.24 + Math.sin(s.tick * 0.004) * W * 0.05;
-  ctx.fillStyle = '#050403';
-  ctx.fillRect(px, groundY - H * 0.16, W * 0.045, H * 0.16);
+  // Ground, with a lit rim at the horizon.
+  const sand = ctx.createLinearGradient(0, groundY, 0, H);
+  sand.addColorStop(0, '#4a2f1a');
+  sand.addColorStop(1, '#120c08');
+  ctx.fillStyle = sand;
+  ctx.fillRect(0, groundY, W, H - groundY);
+  ctx.fillStyle = hexA(s.accent, 0.5);
+  ctx.fillRect(0, groundY, W, Math.max(1, H * 0.006));
+
+  // The ship, small, doing the work.
+  const px = W * 0.2 + Math.sin(s.tick * 0.003) * W * 0.04;
+  ctx.fillStyle = '#0a0705';
+  ctx.beginPath();
+  ctx.moveTo(px - W * 0.035, groundY);
+  ctx.lineTo(px - W * 0.022, groundY - H * 0.11);
+  ctx.lineTo(px + W * 0.022, groundY - H * 0.11);
+  ctx.lineTo(px + W * 0.035, groundY);
+  ctx.closePath();
+  ctx.fill();
+  ctx.fillRect(px - W * 0.004, groundY - H * 0.17, W * 0.008, H * 0.06);
 
   if (s.inCombat) {
-    ctx.fillStyle = `rgba(196,74,47,${0.18 + 0.14 * Math.sin(s.tick * 0.25)})`;
+    ctx.fillStyle = `rgba(196,74,47,${0.14 + 0.12 * Math.sin(s.tick * 0.25)})`;
     ctx.fillRect(0, 0, W, H);
   }
+}
+
+function hexA(hex: string, alpha: number): string {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  return `rgba(${r},${g},${b},${alpha})`;
 }
 
 /**

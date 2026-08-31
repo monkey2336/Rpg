@@ -19,7 +19,7 @@ import { getZone } from './content/zones.js';
 import { RARITY_DEFS } from './content/items.js';
 import { getBoss } from './content/bosses.js';
 import { TICK_HZ } from './combat.js';
-import { weakPointPos, type ArenaState } from './arena.js';
+import { ARENA_RADIUS, weakPointPos, type ArenaEvent, type ArenaState } from './arena.js';
 
 export type AlertKind = 'none' | 'hold-full' | 'stalled' | 'boss-ready' | 'downed';
 
@@ -73,6 +73,14 @@ export interface FullSnapshot {
   route: WidgetSnapshot;
   arena: ArenaSnapshot | null;
   notices: string[];
+  /**
+   * The events the sim emitted for the tick this snapshot covers.
+   *
+   * The sim reports *what happened*; everything about how it feels — muzzle
+   * flash, tracer, spark spray, floating damage number, hitstop — is decided by
+   * presentation from this list. Empty while docked.
+   */
+  events: ArenaEvent[];
 }
 
 export interface ArenaSnapshot {
@@ -83,6 +91,7 @@ export interface ArenaSnapshot {
   shake: number;
   hitstop: number;
   outcome: string;
+  arenaRadius: number;
   gate: { kills: number; killsNeeded: number; deposits: number; depositsNeeded: number; scans: number; scansNeeded: number; met: boolean };
   entities: {
     id: number;
@@ -90,9 +99,13 @@ export interface ArenaSnapshot {
     defId: string;
     x: number;
     y: number;
-    w: number;
-    h: number;
-    facing: number;
+    z: number;
+    radius: number;
+    height: number;
+    yaw: number;
+    /** Ground distance travelled, for driving walk cycles. */
+    gait: number;
+    grounded: boolean;
     hp: number;
     hpMax: number;
     shield: number;
@@ -100,15 +113,27 @@ export interface ArenaSnapshot {
     armor: number;
     armorMax: number;
     flash: number;
+    iframes: number;
     statuses: string[];
-    weakPoints: { x: number; y: number; r: number; label: string; broken: boolean }[];
+    weakPoints: { x: number; y: number; z: number; r: number; label: string }[];
   }[];
-  projectiles: { x: number; y: number; type: string; r: number; hostile: boolean }[];
-  telegraphs: { x: number; y: number; r: number; shape: string; type: string; progress: number; angle: number }[];
-  deposits: { x: number; progress: number; depleted: boolean }[];
-  scans: { x: number; progress: number; done: boolean }[];
-  player: { x: number; y: number; aim: number; dodging: boolean; interacting: boolean };
-  boss: { name: string; phase: number; phases: number; fraction: number; briefing: string } | null;
+  projectiles: { x: number; y: number; z: number; type: string; r: number; hostile: boolean }[];
+  telegraphs: { x: number; z: number; r: number; shape: string; type: string; progress: number; yaw: number }[];
+  deposits: { x: number; z: number; progress: number; depleted: boolean }[];
+  scans: { x: number; z: number; progress: number; done: boolean }[];
+  player: {
+    x: number;
+    y: number;
+    z: number;
+    aimYaw: number;
+    aimPitch: number;
+    recoil: number;
+    beamRamp: number;
+    dodging: boolean;
+    interacting: boolean;
+    firing: boolean;
+  };
+  boss: { name: string; phase: number; phases: number; fraction: number; briefing: string; venting: boolean } | null;
 }
 
 export function buildWidgetSnapshot(session: Session): WidgetSnapshot {
@@ -180,7 +205,7 @@ export function buildWidgetSnapshot(session: Session): WidgetSnapshot {
   };
 }
 
-export function buildFullSnapshot(session: Session, notices: string[] = []): FullSnapshot {
+export function buildFullSnapshot(session: Session, notices: string[] = [], events: ArenaEvent[] = []): FullSnapshot {
   const { state } = session;
   const d = derive(state);
   const p = state.player.defences;
@@ -226,6 +251,7 @@ export function buildFullSnapshot(session: Session, notices: string[] = []): Ful
     route: buildWidgetSnapshot(session),
     arena: session.arena ? buildArenaSnapshot(session.arena) : null,
     notices,
+    events,
   };
 }
 
@@ -243,6 +269,7 @@ function buildArenaSnapshot(a: ArenaState): ArenaSnapshot {
     shake: a.shake,
     hitstop: a.hitstop,
     outcome: a.outcome,
+    arenaRadius: ARENA_RADIUS,
     gate: {
       kills: a.kills,
       killsNeeded: zone.gate.kills,
@@ -260,9 +287,12 @@ function buildArenaSnapshot(a: ArenaState): ArenaSnapshot {
         defId: e.defId,
         x: e.x,
         y: e.y,
-        w: e.w,
-        h: e.h,
-        facing: e.facing,
+        z: e.z,
+        radius: e.radius,
+        height: e.height,
+        yaw: e.yaw,
+        gait: e.gait,
+        grounded: e.grounded,
         hp: e.def.health,
         hpMax: e.def.healthMax,
         shield: e.def.shield,
@@ -270,29 +300,42 @@ function buildArenaSnapshot(a: ArenaState): ArenaSnapshot {
         armor: e.def.armor,
         armorMax: e.def.armorMax,
         flash: e.hitFlash,
+        iframes: e.iframes,
         statuses: e.statuses.map((s) => s.kind),
         weakPoints: e.weakPoints
           .filter((wp) => wp.exposed && !wp.broken)
-          .map((wp) => ({ ...weakPointPos(e, wp), r: wp.radius, label: wp.label, broken: wp.broken })),
+          .map((wp) => ({ ...weakPointPos(e, wp), r: wp.radius, label: wp.label })),
       })),
-    projectiles: a.projectiles.map((pj) => ({ x: pj.x, y: pj.y, type: pj.damageType, r: pj.radius, hostile: pj.faction === 'hostile' })),
+    projectiles: a.projectiles.map((pj) => ({
+      x: pj.x,
+      y: pj.y,
+      z: pj.z,
+      type: pj.damageType,
+      r: pj.radius,
+      hostile: pj.faction === 'hostile',
+    })),
     telegraphs: a.telegraphs.map((t) => ({
       x: t.x,
-      y: t.y,
+      z: t.z,
       r: t.radius,
       shape: t.shape,
       type: t.damageType,
       progress: 1 - t.ticksLeft / Math.max(1, t.totalTicks),
-      angle: t.angle,
+      yaw: t.yaw,
     })),
-    deposits: a.deposits.map((dp) => ({ x: dp.x, progress: dp.progress / dp.required, depleted: dp.depleted })),
-    scans: a.scans.map((s) => ({ x: s.x, progress: s.progress / s.required, done: s.done })),
+    deposits: a.deposits.map((dp) => ({ x: dp.x, z: dp.z, progress: dp.progress / dp.required, depleted: dp.depleted })),
+    scans: a.scans.map((s) => ({ x: s.x, z: s.z, progress: s.progress / s.required, done: s.done })),
     player: {
       x: player.x,
       y: player.y,
-      aim: a.player.aimAngle,
+      z: player.z,
+      aimYaw: a.player.aimYaw,
+      aimPitch: a.player.aimPitch,
+      recoil: a.player.recoil,
+      beamRamp: a.player.beamRamp,
       dodging: a.player.dodgeLeft > 0,
       interacting: a.player.interactTargetId >= 0,
+      firing: a.player.fireCooldown > 0,
     },
     boss:
       bossEnt && bossDef
@@ -302,6 +345,7 @@ function buildArenaSnapshot(a: ArenaState): ArenaSnapshot {
             phases: bossDef.phases.length,
             fraction: bossEnt.def.health / bossEnt.def.healthMax,
             briefing: bossDef.phases[bossEnt.phase]?.briefing ?? '',
+            venting: (bossEnt.ai.vent ?? 0) > 0,
           }
         : null,
   };

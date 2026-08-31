@@ -138,6 +138,11 @@ async function smokeTest(): Promise<void> {
     // Drive with the reference bot so the captures show the game actually being
     // played, not a mannequin on an empty terrace. The host reads whatever input
     // frame is current, so pushing one per sim tick is exactly what a human does.
+    // The pointer-lock prompt is correct behaviour but would sit over every
+    // capture, so the harness dismisses it before shooting.
+    await windows.full.webContents.executeJavaScript(
+      `document.getElementById('lock-hint').style.display = 'none'`,
+    );
     const { botInput } = await import('../headless/bot.js');
     let botTick = 0;
     const driving = setInterval(() => {
