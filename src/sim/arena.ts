@@ -536,6 +536,14 @@ function grantKillRecovery(a: ArenaState): void {
   p.def.health = Math.min(p.def.healthMax, p.def.health + p.def.healthMax * a.killRecovery);
 }
 
+export interface HitResult {
+  dealt: number;
+  weak: boolean;
+  killed: boolean;
+}
+
+const NO_HIT: HitResult = { dealt: 0, weak: false, killed: false };
+
 function damageEntity(
   a: ArenaState,
   e: Entity,
@@ -546,8 +554,8 @@ function damageEntity(
   hz: number,
   crit: boolean,
   critMult: number,
-): number {
-  if (e.dead || e.iframes > 0) return 0;
+): HitResult {
+  if (e.dead || e.iframes > 0) return NO_HIT;
   const wp = hitWeakPoint(e, hx, hy, hz);
   const weakMult = wp ? wp.multiplier : 1;
   const res = applyDamage(e.def, amount, type, { crit, critMult, weakMult });
@@ -587,7 +595,34 @@ function damageEntity(
       }
     }
   }
-  return res.dealt;
+  return { dealt: res.dealt, weak: !!wp, killed: res.killed };
+}
+
+/**
+ * Hitstop: the frame-freeze on a solid connect.
+ *
+ * This is most of what separates a weapon that feels like it hit something from
+ * one that feels like it emitted a particle, so it is sim state rather than a
+ * renderer flourish — it is deterministic, it is recorded, and a replay of the
+ * same seed stutters in the same places.
+ *
+ * Two rules keep it from becoming a stutter:
+ *  - Beams never freeze. A twenty-shots-a-second weapon that hitches on every
+ *    tick reads as a dropped frame, not as impact.
+ *  - Fast weapons only freeze on something worth freezing for — a weak point, a
+ *    crit, or a kill. Slow, committed weapons freeze on every connect, because
+ *    that is the entire promise of firing one.
+ */
+const HITSTOP_TICKS_PER_FRAME = 40 / 60;
+const SLOW_WEAPON_INTERVAL = 20;
+
+function registerHit(a: ArenaState, w: ResolvedWeapon, res: HitResult, crit: boolean): void {
+  if (res.dealt <= 0 || w.behavior === 'beam') return;
+  const notable = res.weak || res.killed || crit;
+  if (!notable && w.fireInterval < SLOW_WEAPON_INTERVAL) return;
+  const scale = res.weak ? 1.7 : res.killed ? 1.35 : crit ? 1.2 : 1;
+  const ticks = Math.round(w.hitstop * HITSTOP_TICKS_PER_FRAME * scale);
+  a.hitstop = Math.max(a.hitstop, Math.min(9, ticks));
 }
 
 function damagePlayer(a: ArenaState, amount: number, type: DamageType): void {
@@ -713,7 +748,8 @@ function fireWeapon(a: ArenaState, w: ResolvedWeapon, statusMult: number): void 
       const ramp = w.behavior === 'beam' ? 1 + pr.beamRamp * 0.9 : 1;
       const hit = traceHitscan(a, ox, oy, oz, yaw, pitch, w.range);
       if (hit) {
-        damageEntity(a, hit.e, w.damage * ramp, w.damageType, hit.x, hit.y, hit.z, crit, w.critMult);
+        const res = damageEntity(a, hit.e, w.damage * ramp, w.damageType, hit.x, hit.y, hit.z, crit, w.critMult);
+        registerHit(a, w, res, crit);
         maybeStatus(a, hit.e, w, statusMult);
         if (w.behavior === 'beam') pr.beamRamp = Math.min(1, pr.beamRamp + 0.012);
       } else if (w.behavior === 'beam') {
@@ -1090,6 +1126,13 @@ export function stepArena(a: ArenaState, input: InputFrame, ctx: StepContext): A
   a.armorRegen = ctx.armorRegen;
   a.killRecovery = ctx.killRecovery;
 
+  // Frozen on a connect. Nothing moves, nothing thinks, nothing resolves — the
+  // whole world holds for a few hundredths of a second and then snaps back.
+  if (a.hitstop > 0) {
+    a.hitstop -= 1;
+    return a.events;
+  }
+
   const p = playerEntity(a);
   const pr = a.player;
 
@@ -1160,7 +1203,6 @@ export function stepArena(a: ArenaState, input: InputFrame, ctx: StepContext): A
       fireWeapon(a, w, w.statusChanceMult);
       pr.ammo -= 1;
       pr.fireCooldown = w.fireInterval;
-      a.hitstop = Math.max(a.hitstop, w.hitstop);
     }
     if (!input.fire) pr.beamRamp = Math.max(0, pr.beamRamp - 0.02);
   }
@@ -1250,8 +1292,11 @@ export function stepArena(a: ArenaState, input: InputFrame, ctx: StepContext): A
         for (const e of a.entities) {
           if (e.faction !== 'hostile' || e.dead) continue;
           if (inBody(e, pj.x, pj.y, pj.z)) {
-            damageEntity(a, e, pj.damage, pj.damageType, pj.x, pj.y, pj.z, pj.crit, 2);
-            if (ctx.weapon) maybeStatus(a, e, ctx.weapon, ctx.weapon.statusChanceMult);
+            const res = damageEntity(a, e, pj.damage, pj.damageType, pj.x, pj.y, pj.z, pj.crit, 2);
+            if (ctx.weapon) {
+              registerHit(a, ctx.weapon, res, pj.crit);
+              maybeStatus(a, e, ctx.weapon, ctx.weapon.statusChanceMult);
+            }
             consumed = pj.pierce <= 0;
             pj.pierce -= 1;
             break;
@@ -1296,6 +1341,5 @@ export function stepArena(a: ArenaState, input: InputFrame, ctx: StepContext): A
   }
 
   if (a.shake > 0) a.shake = Math.max(0, a.shake - 0.8);
-  if (a.hitstop > 0) a.hitstop -= 1;
   return a.events;
 }

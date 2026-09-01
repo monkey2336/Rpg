@@ -26,7 +26,7 @@ and offline progression that provably matches live play.
 | Big-number formatting from day one | Done. K/M/B/T → aa/ab, with a scientific mode. |
 | Prestige axis | Implemented; unlocks at level 25 and pays out on depth. |
 | 10–14 bosses, 4–6 planets, full content set | Not in Tier 1 by design. The pipelines are data-driven and a second planet is authored and locked. |
-| Audio | Not built. Only the widget's optional alert chime exists. |
+| Audio | Weapon feel and combat audio built, procedurally synthesised — no sample files. Score and per-planet identity not built. |
 
 ## Running it
 
@@ -36,8 +36,9 @@ npm start          # build and launch the game
 ```
 
 ```bash
-npm test           # 82 tests: parity, determinism, arena geometry, combat, loot, saves
-npm run smoke      # boots the real app, plays it, asserts the window contract
+npm test           # 86 tests: parity, determinism, arena geometry, hitstop, combat, loot, saves
+npm run smoke      # boots the real app, plays it, asserts the window contract,
+                   # and renders every audio cue offline to check it is audible
 npm run sim -- balance   # damage matrix, weapon table, hostile TTK
 npm run sim -- soak      # scripted zone clears, headless, no renderer
 npm run sim -- route     # idle yields over a period
@@ -58,7 +59,8 @@ Click the view to take the controls (pointer lock).
 Aiming is camera-driven: the reticle is dead centre and the shot goes where you
 look. Movement is camera-relative, and the sim resolves it that way — the
 camera's heading is part of the input frame, not something the renderer keeps to
-itself.
+itself. Recoil moves your actual aim, not just the view, so a burst has to be
+fought.
 
 Minimising the game window docks it to the corner rather than dropping it in the
 taskbar.
@@ -68,13 +70,18 @@ taskbar.
 From `npm run sim` on this build:
 
 ```
-soak      6/6 clear rate, mean run 162s, mean boss fight 86s
+soak      6/6 clear rate, mean run 178s, mean boss fight 95s
           (reference bot, starting kit, no upgrades — the floor, not the target)
 bench     deployed 1.4us/tick   = 0.01% of one core at 40Hz
           docked   0.22us/tick  = 0.001% of one core at 40Hz
           48h of offline resolved closed-form in 8.9ms, 6MB heap
 parity    every duration tested matches by state hash, exactly
+smoke     11 window-and-audio assertions against the running app;
+          21 audio cues rendered offline, peak 0.03-0.92, 0.05s-1.64s
 ```
+
+Runs got ~10% longer when hitstop landed, which is the point: the world now
+freezes for a few hundredths of a second on a solid connect.
 
 The sim is not what will cost you 3% CPU in widget mode — Chromium is. The
 budget is spent on the compositor, which is why the widget throttles snapshots,
@@ -90,7 +97,7 @@ src/preload/     the renderer's entire view of the outside world (.mts, see note
 src/renderer/    full-mode shell, 3D scene, actors and effects; the corner widget
   vendor/        Three.js, vendored (file:// page, script-src 'self', no network)
 src/headless/    CLI and the scripted reference bot
-test/            82 tests
+test/            86 tests
 docs/            DESIGN.md (decisions, answers to the brief's open questions)
                  ARCHITECTURE.md (the contracts the tests enforce)
 ```
@@ -106,7 +113,7 @@ touched **5 simulation files and zero economy files**:
 | Changed | `arena.ts`, `types.ts`, `snapshot.ts`, and the two content files carrying body geometry |
 | Byte-identical | `combat`, `loot`, `route`, `offline`, `derive`, `state`, `save`, `rng`, `numbers`, `hash`, `trig` |
 | Tests changed | 0 · **69 / 69 passing after**, offline parity included |
-| Tests added since | 13, covering the new 3D geometry — 82 total |
+| Tests added since | 17, covering 3D geometry and hitstop — 86 total |
 
 Geometry lives in the arena; the economy is dimensionless, so a change of
 *dimension* could not reach it. That is what locking the architecture before

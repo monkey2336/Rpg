@@ -15,6 +15,7 @@ import { formatNumber } from '../../sim/numbers.js';
 import type { FullSnapshot } from '../../sim/snapshot.js';
 import { api } from './api.js';
 import { renderScreen, type ScreenId } from './screens.js';
+import { AudioEngine } from './audio.js';
 import { Scene3D } from './scene.js';
 
 const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.querySelector<T>(sel)!;
@@ -22,6 +23,7 @@ const $ = <T extends HTMLElement = HTMLElement>(sel: string): T => document.quer
 const canvas = $<HTMLCanvasElement>('#view');
 const overlay = $<HTMLCanvasElement>('#overlay-canvas');
 const scene = new Scene3D(canvas, overlay);
+const audio = new AudioEngine();
 
 let snapshot: FullSnapshot | null = null;
 let catalog: Record<string, any> = {};
@@ -34,6 +36,12 @@ let pointerLocked = false;
 
 const held = new Set<string>();
 const camera = { yaw: -Math.PI / 2, pitch: 0.22 };
+/**
+ * Recoil is a real offset on the aim, not a camera flourish: a shot that kicks
+ * without moving where the next one goes is a screensaver. It decays back on
+ * its own, and the player fights it with the mouse like any other shooter.
+ */
+const recoil = { pitch: 0, yaw: 0 };
 let firing = false;
 
 const MOUSE_SENS = 0.0024;
@@ -80,7 +88,10 @@ window.addEventListener('blur', () => {
 });
 
 // Pointer lock is what makes mouse-look feel like a game rather than a canvas.
+// It is also the user gesture browsers require before audio may start, so it is
+// the natural place to bring the mixer up.
 canvas.addEventListener('click', () => {
+  audio.resume();
   if (!pointerLocked && snapshot?.mode === 'zone') void canvas.requestPointerLock();
 });
 document.addEventListener('pointerlockchange', () => {
@@ -113,8 +124,8 @@ function pushInput(): void {
     interact: held.has('interact'),
     // Third person: the shot goes where the camera looks. Pitch is negated
     // because screen-down is a positive mouse delta but a negative world pitch.
-    aimYaw: camera.yaw,
-    aimPitch: -camera.pitch,
+    aimYaw: camera.yaw + recoil.yaw,
+    aimPitch: -(camera.pitch + recoil.pitch),
     swapSlot: -1,
     summonBoss: held.has('summon'),
   });
@@ -138,8 +149,18 @@ async function boot(): Promise<void> {
 
   api.onFull((s) => {
     // Every snapshot carries the tick's events; they become muzzle flashes,
-    // tracers, sparks and floating numbers here and nowhere else.
-    if (s.events && s.events.length > 0) scene.consumeEvents(s.events, s.arena);
+    // tracers, sparks, floating numbers, recoil and sound here and nowhere else.
+    if (s.events && s.events.length > 0) {
+      scene.consumeEvents(s.events, s.arena);
+      audio.consumeEvents(s.events, s.arena?.player.y ?? 0);
+      for (const ev of s.events) {
+        if (ev.type !== 'shot') continue;
+        // `amount` carries the archetype's recoil figure. Up and slightly off
+        // to one side, so a burst walks rather than climbing a straight line.
+        recoil.pitch += ev.amount * 0.0042;
+        recoil.yaw += (Math.random() - 0.5) * ev.amount * 0.0026;
+      }
+    }
     snapshot = s;
   });
   api.onNotice(note);
@@ -169,6 +190,9 @@ async function command(name: string, payload: Record<string, unknown> = {}): Pro
 
 async function refresh(): Promise<void> {
   catalog = (await api.catalog()) as Record<string, any>;
+  const settings = catalog.settings ?? {};
+  audio.setVolume(typeof settings.masterVolume === 'number' ? settings.masterVolume : 0.8);
+  audio.setEnabled(settings.audioEnabled !== false);
   if (snapshot && document.querySelector('#screens')?.classList.contains('on')) {
     renderScreen(screen, $('#screen'), {
       snap: snapshot,
@@ -199,6 +223,12 @@ function frame(now: number): void {
   const dtTicks = Math.min(4, ((now - lastFrame) / 25) || 1);
   lastFrame = now;
 
+  // Recoil recovers toward zero on its own; roughly a third of a second to
+  // settle, which is long enough to feel and short enough not to fight.
+  const recover = Math.pow(0.86, dtTicks);
+  recoil.pitch *= recover;
+  recoil.yaw *= recover;
+
   pushInput();
   if (!snapshot) return;
 
@@ -214,8 +244,14 @@ function frame(now: number): void {
   }
 
   if (deployed) {
-    scene.render(snapshot.arena, camera, dtTicks, now);
+    // The view is offset by recoil too, so the kick is visible as well as felt.
+    scene.render(snapshot.arena, { yaw: camera.yaw + recoil.yaw, pitch: camera.pitch + recoil.pitch }, dtTicks, now);
     paintHud(snapshot);
+    audio.update(
+      !!snapshot.arena?.player.firing,
+      snapshot.arena?.player.beamRamp ?? 0,
+      snapshot.weapon?.damageType === 'solar' && catalog.activeArchetype === 'thurible',
+    );
   } else if (now - lastScreenPaint > 500) {
     // Docked screens are static markup; repainting them at 60fps would be
     // pointless work. Half a second is plenty for a resource ticker.

@@ -208,6 +208,72 @@ describe('arena geometry', () => {
     assert.ok(total() < before, 'aiming down should connect');
   });
 
+  describe('hitstop', () => {
+    /** Puts a tall hostile at point-blank range so a level shot cannot miss. */
+    function armed() {
+      const { a, ctx } = fixture();
+      const p = playerEntity(a);
+      p.x = 0;
+      p.z = 0;
+      step(a, ctx, {}, 100);
+      const hostile = a.entities.find((e) => e.faction === 'hostile');
+      assert.ok(hostile);
+      hostile!.x = 100;
+      hostile!.z = 0;
+      hostile!.radius = 30;
+      hostile!.height = 70;
+      hostile!.def.healthMax = 1e9;
+      hostile!.def.health = 1e9;
+      return { a, ctx, hostile: hostile! };
+    }
+
+    it('a connect with a slow weapon freezes the arena', () => {
+      const { a, ctx, hostile } = armed();
+      step(a, ctx, { fire: true, aimYaw: 0, aimPitch: 0 }, 1);
+      assert.ok(a.hitstop > 0, 'the Adze should punch on every connect');
+
+      // Nothing may move while the world is held.
+      const before = { x: hostile.x, z: hostile.z };
+      const frozen = a.hitstop;
+      step(a, ctx, { moveZ: 1, camYaw: 0 }, 1);
+      assert.equal(hostile.x, before.x, 'hostiles must not move during hitstop');
+      assert.equal(hostile.z, before.z);
+      assert.equal(a.hitstop, frozen - 1, 'hitstop must tick down while frozen');
+    });
+
+    it('the freeze ends', () => {
+      const { a, ctx } = armed();
+      step(a, ctx, { fire: true, aimYaw: 0, aimPitch: 0 }, 1);
+      step(a, ctx, {}, 20);
+      assert.equal(a.hitstop, 0, 'hitstop must not be sticky');
+    });
+
+    it('a beam never freezes', () => {
+      // A twenty-shots-a-second weapon that hitches on every tick reads as a
+      // dropped frame, not as impact.
+      const { a, ctx, hostile } = armed();
+      const beam = { ...ctx.weapon!, behavior: 'beam' as const, fireInterval: 2, hitstop: 9 };
+      for (let i = 0; i < 30; i++) {
+        stepArena(a, { ...NEUTRAL_INPUT, fire: true, aimYaw: 0, aimPitch: 0 }, { ...ctx, weapon: beam });
+      }
+      assert.equal(a.hitstop, 0, 'beams must never freeze');
+      assert.ok(hostile.def.health < 1e9, 'the beam should still have been doing damage');
+    });
+
+    it('is deterministic — the same seed stutters in the same places', () => {
+      const trace = () => {
+        const { a, ctx } = armed();
+        const out: number[] = [];
+        for (let i = 0; i < 200; i++) {
+          stepArena(a, { ...NEUTRAL_INPUT, fire: true, aimYaw: 0, aimPitch: 0 }, ctx);
+          out.push(a.hitstop);
+        }
+        return out.join(',');
+      };
+      assert.equal(trace(), trace());
+    });
+  });
+
   it('prefers an exposed weak point deeper inside a body over the surface', () => {
     // This is the bug the 2D build shipped: a hit resolves where the ray enters
     // the body, which is never inside a weak-point volume further in.

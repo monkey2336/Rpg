@@ -300,11 +300,16 @@ into metal.
 
 ## 6. What Tier 2 needs next, in order
 
+Quality bar #2 says weapon feel is polished *before* content scaling, so audio
+and hitstop were done ahead of more bosses. That is now the case: 21 procedural
+cues, hitstop as deterministic sim state, and recoil that moves the aim.
+
 1. **Two more bosses.** The phase machine and telegraph vocabulary are data-driven
    and generalise; this is authoring plus iteration, and it is the thing that
    proves the boss pipeline rather than the boss.
-2. **Audio.** Weapon impact first, per the brief's own weighting. Nothing else in
-   the game moves the perceived quality bar as far per hour spent.
+2. **The score, and a per-planet sonic identity.** Combat audio exists; the
+   sparse drone-forward *bed* the brief asks for is one placeholder loop. Long
+   tracks and few cues, one identity per planet.
 3. **The remaining five weapon archetypes.** They are already specified; the beam
    ramp and the lob arc are implemented, so the mechanically novel work is the
    rail's charge and the swarm's homing.

@@ -28,6 +28,7 @@ export interface Settings {
   /** Widget render rate. 0 means "state only, static frame". */
   widgetFps: number;
   telemetryOptIn: boolean;
+  audioEnabled: boolean;
   masterVolume: number;
 }
 
@@ -152,6 +153,7 @@ export const DEFAULT_SETTINGS: Settings = {
   alertChimes: false,
   widgetFps: 12,
   telemetryOptIn: false,
+  audioEnabled: true,
   masterVolume: 0.8,
 };
 

@@ -236,6 +236,58 @@ and a single reused muzzle light. Damage numbers and the reticle are drawn on a
 
 ---
 
+## 5c. Audio
+
+Every sound is synthesised at runtime through the Web Audio API. No sample
+files, for the same reasons there are no art assets: one committed direction, no
+pipeline, works offline, and a cue is a handful of numbers to tune rather than a
+recording to redo.
+
+It is driven by the **same `ArenaEvent` stream that drives the visual effects**,
+which is the point — the sim reports what happened once, and both the eye and the
+ear are served from that one report. Nothing in `src/sim` knows audio exists.
+
+The cue table is typed against `BaseAudioContext` rather than `AudioContext`, so
+every cue can be rendered into an `OfflineAudioContext`. That is what makes sound
+testable in a build nobody can listen to: `npm run smoke` renders all 21 cues
+headlessly and asserts each one is audible, does not clip, and ends. Those are
+exactly the three failure modes of synthesised audio you cannot hear.
+
+The master bus ends in a `DynamicsCompressor` acting as a limiter, because
+procedural cues stack unpredictably in a firefight and clipping is the fastest
+way to sound cheap. Two continuous sources sit outside the cue system: the drone
+bed (three detuned low oscillators plus filtered wind, on a very slow filter
+sweep) and the solar lance's whine, whose gain follows the beam ramp.
+
+Audio starts on the pointer-lock click, because browsers refuse to open an audio
+context without a user gesture and that click is the natural moment.
+
+---
+
+## 5d. Feel
+
+Hitstop is **simulation state, not a renderer flourish**. It lives in
+`ArenaState`, `stepArena` returns early while it is counting down, and a replay
+of the same seed stutters in exactly the same places. That is what makes it
+safe: feel is recorded, deterministic, and covered by tests.
+
+Two rules keep it from becoming a stutter:
+
+- **Beams never freeze.** A twenty-shots-a-second weapon that hitches every tick
+  reads as a dropped frame, not as impact.
+- **Fast weapons freeze only on something worth freezing for** — a weak point, a
+  crit, or a kill. Slow committed weapons freeze on every connect, because that
+  is the entire promise of firing one.
+
+Recoil is the mirror image: it lives entirely in presentation, but it offsets the
+*aim* that gets sent to the sim, not just the camera. A kick that does not move
+where the next shot goes is a screensaver.
+
+Adding hitstop lengthened a reference run by about 10% (162s to 178s). That is
+the cost of the world holding still on a connect, and it is the right trade.
+
+---
+
 ## 6. Snapshots
 
 Renderers never see `GameState`. They receive one of two projections built by the

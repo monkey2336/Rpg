@@ -254,6 +254,15 @@ const SCREENS: Record<ScreenId, (ctx: Ctx) => string> = {
           <label class="meta"><input type="checkbox" data-set="alertChimes" ${s.alertChimes ? 'checked' : ''} /> Alert chimes (off by default)</label>
         </div>
         <div class="card">
+          <div class="title">Audio</div>
+          <label class="meta"><input type="checkbox" data-set="audioEnabled" ${s.audioEnabled !== false ? 'checked' : ''} /> Sound</label>
+          <label class="meta">Volume <input type="range" min="0" max="1" step="0.05" value="${s.masterVolume ?? 0.8}" data-set="masterVolume" /></label>
+          <div class="meta">
+            Everything is synthesised at runtime — no sample files, for the same reason there are no art assets.
+            Sparse and low, drone-forward. The corner widget stays silent unless you opt into alert chimes.
+          </div>
+        </div>
+        <div class="card">
           <div class="title">Display</div>
           <label class="meta">Notation
             <select data-set="notation">

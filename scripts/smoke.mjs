@@ -48,6 +48,41 @@ if (!existsSync(reportPath)) {
 }
 const report = JSON.parse(await readFile(reportPath, 'utf8'));
 
+/**
+ * A cue is good if it makes sound (peak well above noise), does not clip, and
+ * ends. Those three are exactly the failure modes of synthesised audio you
+ * cannot hear.
+ */
+function audioOk(audio) {
+  if (!audio) return { ok: false, problems: ['no audio report'], count: 0 };
+  const problems = [];
+  let minPeak = Infinity;
+  let maxPeak = 0;
+  let shortest = Infinity;
+  let longest = 0;
+  const names = Object.keys(audio);
+  for (const name of names) {
+    const { peak, seconds } = audio[name];
+    if (peak < 0.02) problems.push(`${name} is inaudible (peak ${peak})`);
+    if (peak > 1.0) problems.push(`${name} clips (peak ${peak})`);
+    if (seconds <= 0.01) problems.push(`${name} has no length`);
+    if (seconds > 2.9) problems.push(`${name} never ends (${seconds}s)`);
+    minPeak = Math.min(minPeak, peak);
+    maxPeak = Math.max(maxPeak, peak);
+    shortest = Math.min(shortest, seconds);
+    longest = Math.max(longest, seconds);
+  }
+  return {
+    ok: problems.length === 0 && names.length > 15,
+    problems,
+    count: names.length,
+    minPeak,
+    maxPeak,
+    shortest,
+    longest,
+  };
+}
+
 const checks = [
   ['boot succeeded', report.ok === true],
   ['widget is 360x220', report.widgetBounds?.width === 360 && report.widgetBounds?.height === 220],
@@ -59,7 +94,14 @@ const checks = [
   ['boss encounter rendered', report.arena?.bossSpawned === true],
   ['route runs while docked', !!report.route?.zoneId],
   ['docked screens render', report.screensCaptured === 5],
+  ['every audio cue is audible', audioOk(report.audio).ok],
 ];
+
+if (report.audio) {
+  const a = audioOk(report.audio);
+  console.log(`\n  audio: ${a.count} cues rendered, peak ${a.minPeak}–${a.maxPeak}, ${a.shortest}s–${a.longest}s`);
+  for (const bad of a.problems) console.log(`    PROBLEM  ${bad}`);
+}
 
 let failed = 0;
 for (const [name, pass] of checks) {

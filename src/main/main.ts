@@ -218,6 +218,40 @@ async function smokeTest(): Promise<void> {
       await writeFile(`${outDir}/screen-${screen}.png`, shot.toPNG());
     }
     report.screensCaptured = 5;
+
+    // Audio cannot be listened to in a headless build, so it is measured
+    // instead: every cue is rendered into an OfflineAudioContext and checked
+    // for peak level and duration. A silent cue, a clipped cue or one that
+    // never ends all fail here rather than in someone's ears.
+    report.audio = await windows.full.webContents.executeJavaScript(`
+      (async () => {
+        const mod = await import('./audio.js');
+        const out = {};
+        for (const name of mod.CUE_NAMES) {
+          const ctx = new OfflineAudioContext(1, 48000 * 3, 48000);
+          const bus = ctx.createGain();
+          bus.connect(ctx.destination);
+          mod.CUES[name](ctx, bus, 0, { gain: 1, vary: 1 });
+          const buf = await ctx.startRendering();
+          const d = buf.getChannelData(0);
+          let peak = 0;
+          let sum = 0;
+          let last = 0;
+          for (let i = 0; i < d.length; i++) {
+            const v = Math.abs(d[i]);
+            if (v > peak) peak = v;
+            sum += v * v;
+            if (v > 0.0015) last = i;
+          }
+          out[name] = {
+            peak: Math.round(peak * 1000) / 1000,
+            rms: Math.round(Math.sqrt(sum / d.length) * 1000) / 1000,
+            seconds: Math.round((last / 48000) * 100) / 100,
+          };
+        }
+        return out;
+      })()
+    `);
     report.route = host.session.state.route;
     report.restoredVisible = windows.full.isVisible();
     report.ok = true;

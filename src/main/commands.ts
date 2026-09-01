@@ -205,6 +205,7 @@ export function readCatalog(host: SimHost): Record<string, unknown> {
     }),
     loadout: state.player.loadout,
     activeSlot: state.player.activeSlot,
+    activeArchetype: d.weapon?.archetypeId ?? null,
     tech: TECH_NODES.map((t) => ({
       ...t,
       unlocked: state.tech.unlocked.includes(t.id),
