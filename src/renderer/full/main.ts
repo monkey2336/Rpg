@@ -317,7 +317,10 @@ function paintHud(s: FullSnapshot): void {
       (_, i) => `<span class="pip ${i <= a.boss!.phase ? 'on' : ''}"></span>`,
     ).join('');
     $('#boss-brief').textContent = a.boss.briefing;
-    $('#boss-vent').classList.toggle('on', a.boss.venting);
+    const vent = $('#boss-vent');
+    vent.classList.toggle('on', a.boss.windowOpen || a.boss.warded);
+    vent.textContent = a.boss.warded ? 'Warded — destroy the pylons' : a.boss.windowLabel;
+    vent.style.color = a.boss.warded ? 'var(--danger)' : 'var(--accent)';
   }
 
   // A red bloom at the edges when badly hurt, instead of a number to read.

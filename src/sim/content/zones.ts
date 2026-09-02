@@ -64,7 +64,7 @@ export const ZONES: readonly ZoneDef[] = [
     recommendedPower: 26,
     enemyPool: ['vault-mite', 'flint-skirmisher', 'hollow-drone', 'duster-artillery'],
     elite: 'chalk-praetor',
-    bossId: null,
+    bossId: 'the-bellows',
     gate: { kills: 40, deposits: 5, scans: 4 },
     idle: { matPerCycle: 61, dataPerCycle: 6, cycleTicks: 620, dropChance: 0.19 },
     depositTier: 2,
@@ -81,7 +81,7 @@ export const ZONES: readonly ZoneDef[] = [
     recommendedPower: 34,
     enemyPool: ['vault-mite', 'hollow-drone', 'flint-skirmisher', 'duster-artillery'],
     elite: 'chalk-praetor',
-    bossId: null,
+    bossId: 'the-choir',
     gate: { kills: 30, deposits: 2, scans: 8 },
     idle: { matPerCycle: 38, dataPerCycle: 17, cycleTicks: 560, dropChance: 0.14 },
     depositTier: 2,
@@ -123,6 +123,33 @@ export function getPlanet(id: string): PlanetDef {
   return p;
 }
 
+/**
+ * The next zone to open when `zoneId` is cleared.
+ *
+ * Ordered: the rest of the planet first, in the order its zones are authored,
+ * then the first zone of the next planet. Progression used to be "the first
+ * undiscovered key in an object", which is not an order at all — it happened to
+ * work with one planet and would have shuffled the moment there were two.
+ */
+export function nextZoneAfter(zoneId: string): string | null {
+  const zone = getZone(zoneId);
+  const planet = getPlanet(zone.planetId);
+  const i = planet.zones.indexOf(zoneId);
+  if (i >= 0 && i + 1 < planet.zones.length) return planet.zones[i + 1]!;
+
+  const p = PLANETS.findIndex((x) => x.id === planet.id);
+  const next = PLANETS[p + 1];
+  return next?.zones[0] ?? null;
+}
+
+/** Fuel needed to reach `zoneId` from `fromZoneId`. Same planet is free. */
+export function travelCost(fromZoneId: string, zoneId: string): number {
+  const to = getZone(zoneId);
+  const from = getZone(fromZoneId);
+  if (to.planetId === from.planetId) return 0;
+  return getPlanet(to.planetId).fuel;
+}
+
 /** Zones playable in the Tier 1 prototype build. */
-export const PROTOTYPE_ZONES = ['ochre-shelf'];
+export const PROTOTYPE_ZONES = ['ochre-shelf', 'the-throats', 'lantern-derelict'];
 export const STARTING_ZONE = 'ochre-shelf';

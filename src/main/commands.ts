@@ -8,7 +8,7 @@
 import { derive, resolveWeapon } from '../sim/derive.js';
 import { assertParity } from '../sim/offline.js';
 import { assignRoute, canAssignRoute, clearRoute, planCycle } from '../sim/route.js';
-import { doPrestige, landInZone, requestBoss, returnToShip, canPrestige, prestigeGain } from '../sim/sim.js';
+import { doPrestige, landInZoneChecked, requestBoss, returnToShip, canPrestige, prestigeGain, travelCostFor } from '../sim/sim.js';
 import { breakdownValue, itemPower } from '../sim/loot.js';
 import { addMaterials, findItem, type Settings } from '../sim/state.js';
 import { getTech, techAvailable, TECH_NODES } from '../sim/content/tech.js';
@@ -48,7 +48,11 @@ export function runCommand(host: SimHost, name: CommandName, payload: Record<str
   switch (name) {
     case 'land': {
       const zoneId = String(payload.zoneId ?? '');
-      if (!landInZone(session, zoneId)) return no('That zone is not on the chart yet.');
+      const result = landInZoneChecked(session, zoneId);
+      if (result === 'unknown-zone') return no('That zone is not on the chart yet.');
+      if (result === 'no-fuel') {
+        return no(`Not enough fuel — that crossing needs ${travelCostFor(session, zoneId)}. It refills while docked.`);
+      }
       return ok(`Landing at ${zoneId}.`);
     }
 
@@ -183,6 +187,7 @@ export function readCatalog(host: SimHost): Record<string, unknown> {
   const d = derive(state);
   return {
     zoneProgress: state.zones,
+    travelCosts: Object.fromEntries(Object.keys(state.zones).map((z) => [z, travelCostFor(host.session, z)])),
     offlineCapHours: d.offlineCapHours,
     lastOffline: state.lastOfflineReport,
     inventory: state.inventory.items.map((item) => {

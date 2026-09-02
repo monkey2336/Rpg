@@ -25,7 +25,8 @@ and offline progression that provably matches live play.
 | Versioned, migration-safe, corruption-recovering saves | Done. Atomic writes, three rolling backups, checksum, explicit repair pass. |
 | Big-number formatting from day one | Done. K/M/B/T → aa/ab, with a scientific mode. |
 | Prestige axis | Implemented; unlocks at level 25 and pays out on depth. |
-| 10–14 bosses, 4–6 planets, full content set | Not in Tier 1 by design. The pipelines are data-driven and a second planet is authored and locked. |
+| 10–14 bosses, 4–6 planets, full content set | Three bosses, three zones, two planets. The rest is authoring, not engineering — see below. |
+| Travel layer: fuel as a soft cost | Done. Crossing planets costs fuel; it refills while docked. Same-planet travel is free. |
 | Audio | Weapon feel and combat audio built, procedurally synthesised — no sample files. Score and per-planet identity not built. |
 
 ## Running it
@@ -36,11 +37,11 @@ npm start          # build and launch the game
 ```
 
 ```bash
-npm test           # 86 tests: parity, determinism, arena geometry, hitstop, combat, loot, saves
+npm test           # 98 tests: parity, determinism, arena geometry, hitstop, bosses, travel, loot, saves
 npm run smoke      # boots the real app, plays it, asserts the window contract,
                    # and renders every audio cue offline to check it is audible
 npm run sim -- balance   # damage matrix, weapon table, hostile TTK
-npm run sim -- soak      # scripted zone clears, headless, no renderer
+npm run sim -- soak -- --zone the-throats   # scripted clears of any zone, headless
 npm run sim -- route     # idle yields over a period
 npm run sim -- parity    # stepwise vs closed-form offline, hash compared
 npm run sim -- bench     # sim cost per tick, deployed and docked
@@ -70,13 +71,15 @@ taskbar.
 From `npm run sim` on this build:
 
 ```
-soak      6/6 clear rate, mean run 178s, mean boss fight 95s
-          (reference bot, starting kit, no upgrades — the floor, not the target)
+soak      Kiln Warden  4/4 clears, boss fight 96s
+          The Bellows  4/4 clears, boss fight 81s
+          The Choir    5/5 clears, boss fight 83s
+          (reference bot geared to each zone — the floor, not the target)
 bench     deployed 1.4us/tick   = 0.01% of one core at 40Hz
           docked   0.22us/tick  = 0.001% of one core at 40Hz
           48h of offline resolved closed-form in 8.9ms, 6MB heap
 parity    every duration tested matches by state hash, exactly
-smoke     11 window-and-audio assertions against the running app;
+smoke     12 window, boss and audio assertions against the running app;
           21 audio cues rendered offline, peak 0.03-0.92, 0.05s-1.64s
 ```
 
@@ -97,7 +100,7 @@ src/preload/     the renderer's entire view of the outside world (.mts, see note
 src/renderer/    full-mode shell, 3D scene, actors and effects; the corner widget
   vendor/        Three.js, vendored (file:// page, script-src 'self', no network)
 src/headless/    CLI and the scripted reference bot
-test/            86 tests
+test/            98 tests
 docs/            DESIGN.md (decisions, answers to the brief's open questions)
                  ARCHITECTURE.md (the contracts the tests enforce)
 ```

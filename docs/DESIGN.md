@@ -239,6 +239,59 @@ time-linear payout produces.
 
 ---
 
+## 3b. Did the boss pipeline generalise?
+
+The whole point of authoring a second and third boss was to find out whether the
+phase machine was general or whether the Kiln Warden had been special-cased. The
+honest answer is: mostly general, and the exceptions were worth fixing.
+
+**What was already data.** Phases, health thresholds, per-phase speed, armour and
+shield multipliers, exposed weak points, spawns, arena damage-over-time, and the
+telegraph patterns. Two entire bosses — 191 lines of `bosses.ts` — needed no
+engineering at all for any of that.
+
+**What was secretly hardcoded.** The Warden's venting. It was written as
+`if (e.phase === 0)` against a weak point literally named `'vents'`, which is
+not a mechanic, it is one boss's special case wearing a mechanic's clothes. The
+Bellows wanted the same thing — a timed window that opens a named weak point —
+so the fix was to make it `PhaseWindow` data. The Warden now uses the same field
+every other boss does, and it lost 20 lines of bespoke code in the process.
+
+**What genuinely needed new engineering.** Three properties, ~90 lines of
+`arena.ts` between them, each reusable by every future boss:
+
+| Property | What it buys | Used by |
+|---|---|---|
+| `window` | A timed exposure with optional shield suppression and pull | Warden, Bellows |
+| `invulnerableWhileAdds` + `respawnTicks` | The boss is not the target until its escort is down | Choir |
+| `gravityMult` | The arena's physics is a phase property | Choir |
+
+That ratio — two bosses' worth of content for three generic properties — is what
+"the pipeline generalises" actually looks like. It is not zero engineering, and
+anyone claiming a content pipeline needs zero engineering for its second entry
+has not written the second entry.
+
+**What the exercise caught.** Two design bugs that only a second and third boss
+would surface:
+
+- `respawnTicks` was first written as a free-running timer, which meant the
+  Choir's pylons topped themselves up before the player could ever burst the
+  boss. It was permanently invulnerable and the reference bot fought it for
+  9,900 seconds without winning. Respawn now counts from the escort being
+  *fully* cleared, so clearing it always buys a window of exactly that length.
+  That is the fight.
+- Zone progression was "the first undiscovered key in an object", which is not
+  an order at all. It happened to work with one planet and would have shuffled
+  the moment there were two. It is now explicitly ordered: the rest of the
+  planet, then the first zone of the next.
+
+**Mechanical distinctness is now a test, not an intention.** `bosses.test.ts`
+asserts that each phase changes a mechanic rather than a number, and that the
+pull, the ward and the gravity change are each owned by exactly one boss. A
+fourth boss that is a reskin will fail the suite.
+
+---
+
 ## 4. Tone bible
 
 Everything named here is original. The references in the brief are tone only.
@@ -288,8 +341,8 @@ into metal.
 | | |
 |---|---|
 | Planets | Khadir (playable), Sabb (authored, locked) |
-| Zones | The Ochre Shelf (playable), The Throats, The Lantern (orbital), The Grey Flats |
-| Bosses | The Kiln Warden — 3 phases, 3 weak points, signature drop, codex entry |
+| Zones | The Ochre Shelf, The Throats, The Lantern (orbital) — all playable with bosses; The Grey Flats authored |
+| Bosses | The Kiln Warden, The Bellows, The Choir — 3 phases each, weak points, signature drops, codex entries |
 | Hostiles | 4 base types + 1 elite, one pressure each |
 | Weapons | 8 archetypes authored, 3 unlocked in the prototype |
 | Item bases | 11 hand-authored, plus 1 signature |
@@ -304,10 +357,7 @@ Quality bar #2 says weapon feel is polished *before* content scaling, so audio
 and hitstop were done ahead of more bosses. That is now the case: 21 procedural
 cues, hitstop as deterministic sim state, and recoil that moves the aim.
 
-1. **Two more bosses.** The phase machine and telegraph vocabulary are data-driven
-   and generalise; this is authoring plus iteration, and it is the thing that
-   proves the boss pipeline rather than the boss.
-2. **The score, and a per-planet sonic identity.** Combat audio exists; the
+1. **The score, and a per-planet sonic identity.** Combat audio exists; the
    sparse drone-forward *bed* the brief asks for is one placeholder loop. Long
    tracks and few cues, one identity per planet.
 3. **The remaining five weapon archetypes.** They are already specified; the beam

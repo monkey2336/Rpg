@@ -167,26 +167,42 @@ export class Scene3D {
     let seed = 0;
     for (let i = 0; i < snap.zoneId.length; i++) seed = (Math.imul(seed, 31) + snap.zoneId.charCodeAt(i)) >>> 0;
     const rnd = mulberry(seed);
+    const orbital = snap.kind === 'orbital';
+
+    // A derelict in low orbit is not a desert with different paint. It gets a
+    // deck instead of dunes, hull ribs instead of kilns, a starfield instead of
+    // a sky, and thin air instead of dust — the brief asks for one of these per
+    // planet precisely so it reads as a change of place.
+    this.scene.fog = orbital
+      ? new THREE.FogExp2(0x1c232e, 0.00016)
+      : new THREE.FogExp2(0x9c6236, 0.00028);
+    this.sun.intensity = orbital ? 5.2 : 4.4;
+    this.sun.color.setHex(orbital ? 0xf2f6ff : 0xfff0cf);
 
     // --- ground: a wide displaced plane, so the horizon is not a hard edge ---
     const groundGeo = new THREE.PlaneGeometry(6400, 6400, 96, 96);
     groundGeo.rotateX(-Math.PI / 2);
     const gp = groundGeo.attributes.position!;
     const colors = new Float32Array(gp.count * 3);
-    const sand = new THREE.Color(0x9a6b3e);
-    const dark = new THREE.Color(0x4a2f1a);
+    const sand = new THREE.Color(orbital ? 0x4a5360 : 0x9a6b3e);
+    const dark = new THREE.Color(orbital ? 0x1e242c : 0x4a2f1a);
     for (let i = 0; i < gp.count; i++) {
       const x = gp.getX(i);
       const z = gp.getZ(i);
       const d = Math.sqrt(x * x + z * z);
       // Flat inside the arena so the fight is fair; dunes beyond it.
       const outside = Math.max(0, d - snap.arenaRadius) / 900;
-      const h = Math.sin(x * 0.004) * Math.cos(z * 0.0035) * 34 * Math.min(1, outside) +
-        Math.sin(x * 0.014 + z * 0.011) * 5 * Math.min(1, outside);
+      // A deck is flat and falls away into nothing; a shelf has dunes beyond it.
+      const h = orbital
+        ? -Math.min(1, Math.max(0, d - snap.arenaRadius - 260) / 500) * 420
+        : Math.sin(x * 0.004) * Math.cos(z * 0.0035) * 34 * Math.min(1, outside) +
+          Math.sin(x * 0.014 + z * 0.011) * 5 * Math.min(1, outside);
       gp.setY(i, h);
-      // Two frequencies of drift, so the ground has grain instead of a gradient.
-      const t = 0.5 + 0.5 * Math.sin(x * 0.02 + z * 0.017);
-      const t2 = 0.5 + 0.5 * Math.sin(x * 0.0037 - z * 0.0051);
+      // Deck plating reads as a grid; sand reads as two frequencies of drift.
+      const t = orbital
+        ? (Math.abs((x % 160) - 80) < 7 || Math.abs((z % 160) - 80) < 7 ? 0.1 : 0.85)
+        : 0.5 + 0.5 * Math.sin(x * 0.02 + z * 0.017);
+      const t2 = orbital ? 0.2 : 0.5 + 0.5 * Math.sin(x * 0.0037 - z * 0.0051);
       const c = sand.clone().lerp(dark, t * 0.35 + t2 * 0.45);
       colors[i * 3] = c.r;
       colors[i * 3 + 1] = c.g;
@@ -201,7 +217,7 @@ export class Scene3D {
     // --- the terrace rim: reads the play space without walling it in --------
     const rim = new THREE.Mesh(
       new THREE.TorusGeometry(snap.arenaRadius, 7, 5, 96),
-      new THREE.MeshLambertMaterial({ color: 0x4a3320 }),
+      new THREE.MeshLambertMaterial({ color: orbital ? 0x2c343e : 0x4a3320 }),
     );
     rim.rotation.x = Math.PI / 2;
     rim.position.y = 2;
@@ -209,40 +225,78 @@ export class Scene3D {
     rim.castShadow = true;
     env.add(rim);
 
-    // --- kilns: enormous, static, and the entire sense of scale -------------
-    const kilnMat = new THREE.MeshLambertMaterial({ color: 0x3d2a1a });
-    const kilnDark = new THREE.MeshLambertMaterial({ color: 0x2a1c11 });
-    const count = 16;
-    for (let i = 0; i < count; i++) {
-      const ang = (i / count) * Math.PI * 2 + rnd() * 0.3;
-      const dist = snap.arenaRadius + 220 + rnd() * 900;
-      const h = 260 + rnd() * 620;
-      const w = 70 + rnd() * 130;
-      const kiln = new THREE.Group();
-      const body = new THREE.Mesh(new THREE.CylinderGeometry(w * 0.62, w, h, 6), kilnMat);
-      body.position.y = h / 2;
-      body.castShadow = true;
-      body.receiveShadow = true;
-      kiln.add(body);
-      const stack = new THREE.Mesh(new THREE.CylinderGeometry(w * 0.16, w * 0.2, h * 0.35, 6), kilnDark);
-      stack.position.y = h * 1.16;
-      stack.castShadow = true;
-      kiln.add(stack);
-      kiln.position.set(Math.cos(ang) * dist, 0, Math.sin(ang) * dist);
-      kiln.rotation.y = rnd() * Math.PI;
-      env.add(kiln);
-    }
+    if (orbital) {
+      // Hull ribs: the derelict's own structure, arcing over the deck. They do
+      // the job the kilns do — they are the reason the player reads as small.
+      const hullMat = new THREE.MeshLambertMaterial({ color: 0x39424e });
+      const strutMat = new THREE.MeshLambertMaterial({ color: 0x232a33 });
+      for (let i = 0; i < 9; i++) {
+        const ang = (i / 9) * Math.PI * 2 + rnd() * 0.2;
+        const dist = snap.arenaRadius + 120 + rnd() * 260;
+        const h = 420 + rnd() * 520;
+        const rib = new THREE.Group();
+        const spine = new THREE.Mesh(new THREE.BoxGeometry(36, h, 36), hullMat);
+        spine.position.y = h / 2;
+        spine.castShadow = true;
+        spine.receiveShadow = true;
+        rib.add(spine);
+        // A cantilevered arm, so the silhouette is a gantry and not a pillar.
+        const arm = new THREE.Mesh(new THREE.BoxGeometry(240, 22, 22), strutMat);
+        arm.position.set(-90, h * 0.86, 0);
+        arm.castShadow = true;
+        rib.add(arm);
+        rib.position.set(Math.cos(ang) * dist, 0, Math.sin(ang) * dist);
+        rib.rotation.y = -ang;
+        env.add(rib);
+      }
+      // Cargo stacks left on the deck.
+      for (let i = 0; i < 26; i++) {
+        const ang = rnd() * Math.PI * 2;
+        const dist = snap.arenaRadius * (0.3 + rnd() * 0.62);
+        const w = 26 + rnd() * 46;
+        const crate = new THREE.Mesh(new THREE.BoxGeometry(w, w * (0.6 + rnd()), w), strutMat);
+        crate.position.set(Math.cos(ang) * dist, w * 0.3, Math.sin(ang) * dist);
+        crate.rotation.y = rnd() * Math.PI;
+        crate.castShadow = true;
+        crate.receiveShadow = true;
+        env.add(crate);
+      }
+    } else {
+      // --- kilns: enormous, static, and the entire sense of scale -----------
+      const kilnMat = new THREE.MeshLambertMaterial({ color: 0x3d2a1a });
+      const kilnDark = new THREE.MeshLambertMaterial({ color: 0x2a1c11 });
+      const count = 16;
+      for (let i = 0; i < count; i++) {
+        const ang = (i / count) * Math.PI * 2 + rnd() * 0.3;
+        const dist = snap.arenaRadius + 220 + rnd() * 900;
+        const h = 260 + rnd() * 620;
+        const w = 70 + rnd() * 130;
+        const kiln = new THREE.Group();
+        const body = new THREE.Mesh(new THREE.CylinderGeometry(w * 0.62, w, h, 6), kilnMat);
+        body.position.y = h / 2;
+        body.castShadow = true;
+        body.receiveShadow = true;
+        kiln.add(body);
+        const stack = new THREE.Mesh(new THREE.CylinderGeometry(w * 0.16, w * 0.2, h * 0.35, 6), kilnDark);
+        stack.position.y = h * 1.16;
+        stack.castShadow = true;
+        kiln.add(stack);
+        kiln.position.set(Math.cos(ang) * dist, 0, Math.sin(ang) * dist);
+        kiln.rotation.y = rnd() * Math.PI;
+        env.add(kiln);
+      }
 
-    // --- far mesas, fog-bound, purely for the horizon line ------------------
-    const mesaMat = new THREE.MeshLambertMaterial({ color: 0x4e3722 });
-    for (let i = 0; i < 22; i++) {
-      const ang = rnd() * Math.PI * 2;
-      const dist = 1900 + rnd() * 900;
-      const h = 180 + rnd() * 520;
-      const mesa = new THREE.Mesh(new THREE.CylinderGeometry(180 + rnd() * 260, 320 + rnd() * 300, h, 5), mesaMat);
-      mesa.position.set(Math.cos(ang) * dist, h / 2 - 40, Math.sin(ang) * dist);
-      mesa.rotation.y = rnd() * Math.PI;
-      env.add(mesa);
+      // --- far mesas, fog-bound, purely for the horizon line ----------------
+      const mesaMat = new THREE.MeshLambertMaterial({ color: 0x4e3722 });
+      for (let i = 0; i < 22; i++) {
+        const ang = rnd() * Math.PI * 2;
+        const dist = 1900 + rnd() * 900;
+        const h = 180 + rnd() * 520;
+        const mesa = new THREE.Mesh(new THREE.CylinderGeometry(180 + rnd() * 260, 320 + rnd() * 300, h, 5), mesaMat);
+        mesa.position.set(Math.cos(ang) * dist, h / 2 - 40, Math.sin(ang) * dist);
+        mesa.rotation.y = rnd() * Math.PI;
+        env.add(mesa);
+      }
     }
 
     // --- sky: a gradient dome plus a hard sun disc --------------------------
@@ -253,15 +307,19 @@ export class Scene3D {
         depthWrite: false,
         fog: false,
         uniforms: {
-          top: { value: new THREE.Color(0x1b2436) },
-          mid: { value: new THREE.Color(0x7a4526) },
-          horizon: { value: new THREE.Color(0xe8b07a) },
+          top: { value: new THREE.Color(orbital ? 0x05070c : 0x1b2436) },
+          mid: { value: new THREE.Color(orbital ? 0x0b1018 : 0x7a4526) },
+          horizon: { value: new THREE.Color(orbital ? 0x18232f : 0xe8b07a) },
           accent: { value: new THREE.Color(snap.accent) },
+          stars: { value: orbital ? 1 : 0 },
         },
         vertexShader: `varying vec3 vP; void main(){ vP = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`,
         fragmentShader: `
           varying vec3 vP;
           uniform vec3 top; uniform vec3 mid; uniform vec3 horizon; uniform vec3 accent;
+          uniform float stars;
+          // Cheap hash, only used for the starfield.
+          float h21(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
           void main(){
             vec3 n = normalize(vP);
             float h = clamp(n.y * 1.25 + 0.10, 0.0, 1.0);
@@ -270,7 +328,18 @@ export class Scene3D {
             // A wide warm glow around the sun, so the light has a source.
             float sd = max(0.0, dot(n, normalize(vec3(-0.58, 0.235, -0.78))));
             c += accent * pow(sd, 14.0) * 0.85;
-            c += accent * pow(sd, 3.0) * 0.14;
+            // The wide scatter halo is atmosphere. There is none in orbit, so
+            // out there the accent stays on the planet limb and the star stays
+            // a hard point.
+            c += accent * pow(sd, 3.0) * 0.14 * (1.0 - stars);
+            if (stars > 0.5) {
+              // Vacuum: a sparse starfield, and a dim planet limb low down.
+              vec2 g = floor(n.xy * 260.0);
+              float s = step(0.9965, h21(g)) * smoothstep(-0.05, 0.35, n.y);
+              c += vec3(s) * 0.9;
+              float limb = smoothstep(0.06, -0.30, n.y) * smoothstep(-0.55, -0.05, n.y);
+              c += accent * limb * 0.16;
+            }
             gl_FragColor = vec4(c, 1.0);
           }`,
       }),
@@ -279,8 +348,8 @@ export class Scene3D {
     env.add(sky);
 
     const disc = new THREE.Mesh(
-      new THREE.CircleGeometry(90, 32),
-      new THREE.MeshBasicMaterial({ color: 0xfff0d4, fog: false, depthWrite: false }),
+      new THREE.CircleGeometry(orbital ? 42 : 90, 32),
+      new THREE.MeshBasicMaterial({ color: orbital ? 0xffffff : 0xfff0d4, fog: false, depthWrite: false }),
     );
     disc.position.copy(SUN_DIR).multiplyScalar(3100);
     disc.lookAt(0, disc.position.y, 0);
@@ -656,6 +725,11 @@ export class Scene3D {
         case 'weak':
           this.fx.impact(ev.x, ev.y, ev.z, ev.damageType, true, true);
           this.fx.number(ev.x, ev.y, ev.z, String(Math.round(ev.amount)), '#ff9a3c', 1.6);
+          break;
+        case 'warded':
+          // Deflection, not damage: a cold spark and no number, so the player
+          // reads "that did nothing" rather than "that did a small amount".
+          this.fx.impact(ev.x, ev.y, ev.z, 'arc', false, false);
           break;
         case 'player-hit':
           this.shake = Math.max(this.shake, 5);

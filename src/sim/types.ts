@@ -235,6 +235,26 @@ export interface EnemyDef {
   dataDrop: number;
 }
 
+/**
+ * A timed exposure window — a phase's knowledge check.
+ *
+ * The Kiln Warden venting to cool itself and the Bellows drawing breath are the
+ * same mechanic with different numbers and a different name, which is exactly
+ * why this is data. A window opens a named weak point on a cycle, optionally
+ * suppresses the boss's shield while open, and optionally drags the player in.
+ */
+export interface PhaseWindow {
+  weakPointId: string;
+  openTicks: number;
+  periodTicks: number;
+  /** Shield knitting is suppressed while the window is open. */
+  suppressShield?: boolean;
+  /** Ground-plane pull toward the boss while open, in units per tick. */
+  pull?: number;
+  /** Surfaced on the boss bar and used as the audio cue while open. */
+  label: string;
+}
+
 export interface BossPhaseDef {
   /** Phase begins when health fraction drops at or below this. */
   atHealthFraction: number;
@@ -244,11 +264,29 @@ export interface BossPhaseDef {
   attackIntervalMult: number;
   armorMult: number;
   shieldMult: number;
-  /** Weak points exposed during this phase. */
+  /** Weak points exposed for the whole phase. */
   exposes: string[];
+  /** A weak point exposed only on a cycle. See PhaseWindow. */
+  window?: PhaseWindow;
   /** Adds spawned on entry. */
   spawns: { defId: string; count: number }[];
-  /** Arena-wide damage over time, e.g. rising kiln heat in phase 3. */
+  /**
+   * Ticks after the escort is *fully* cleared before it returns.
+   *
+   * Measured from the last one dying, not on a free-running timer: that is the
+   * difference between "kill them fast and you get a window" and "the boss is
+   * permanently invulnerable", which is what a free-running timer produced.
+   */
+  respawnTicks?: number;
+  /**
+   * The boss takes no damage while any non-boss hostile is alive. Turns its
+   * escort into the actual fight, which is a different problem to solve than
+   * "wait for the window".
+   */
+  invulnerableWhileAdds?: boolean;
+  /** Arena gravity multiplier — failing grav plating, and similar. */
+  gravityMult?: number;
+  /** Arena-wide damage over time, e.g. rising kiln heat. */
   arenaDps: number;
   arenaDamageType: DamageType;
   /** Telegraph patterns available this phase. */

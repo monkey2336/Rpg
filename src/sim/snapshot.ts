@@ -19,7 +19,7 @@ import { getZone } from './content/zones.js';
 import { RARITY_DEFS } from './content/items.js';
 import { getBoss } from './content/bosses.js';
 import { TICK_HZ } from './combat.js';
-import { ARENA_RADIUS, weakPointPos, type ArenaEvent, type ArenaState } from './arena.js';
+import { ARENA_RADIUS, bossIsWarded, weakPointPos, type ArenaEvent, type ArenaState } from './arena.js';
 
 export type AlertKind = 'none' | 'hold-full' | 'stalled' | 'boss-ready' | 'downed';
 
@@ -87,6 +87,8 @@ export interface ArenaSnapshot {
   zoneId: string;
   zoneName: string;
   accent: string;
+  /** 'surface' or 'orbital' — they are not the same place and must not look it. */
+  kind: string;
   tick: number;
   shake: number;
   hitstop: number;
@@ -133,7 +135,18 @@ export interface ArenaSnapshot {
     interacting: boolean;
     firing: boolean;
   };
-  boss: { name: string; phase: number; phases: number; fraction: number; briefing: string; venting: boolean } | null;
+  boss: {
+    name: string;
+    phase: number;
+    phases: number;
+    fraction: number;
+    briefing: string;
+    /** Set while a phase window is open; the label is authored per phase. */
+    windowOpen: boolean;
+    windowLabel: string;
+    /** True while an escort is warding it and shots will not land. */
+    warded: boolean;
+  } | null;
 }
 
 export function buildWidgetSnapshot(session: Session): WidgetSnapshot {
@@ -265,6 +278,7 @@ function buildArenaSnapshot(a: ArenaState): ArenaSnapshot {
     zoneId: a.zoneId,
     zoneName: zone.name,
     accent: zone.accent,
+    kind: zone.kind,
     tick: a.tick,
     shake: a.shake,
     hitstop: a.hitstop,
@@ -345,7 +359,9 @@ function buildArenaSnapshot(a: ArenaState): ArenaSnapshot {
             phases: bossDef.phases.length,
             fraction: bossEnt.def.health / bossEnt.def.healthMax,
             briefing: bossDef.phases[bossEnt.phase]?.briefing ?? '',
-            venting: (bossEnt.ai.vent ?? 0) > 0,
+            windowOpen: (bossEnt.ai.winOpen ?? 0) > 0,
+            windowLabel: bossDef.phases[bossEnt.phase]?.window?.label ?? '',
+            warded: bossIsWarded(a, bossEnt),
           }
         : null,
   };

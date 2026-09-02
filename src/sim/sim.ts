@@ -24,7 +24,7 @@ import {
 } from './arena.js';
 import { getBoss } from './content/bosses.js';
 import { getEnemy } from './content/enemies.js';
-import { getZone } from './content/zones.js';
+import { getZone, nextZoneAfter, travelCost } from './content/zones.js';
 import { breakdownValue, makeSignature, rollWeapon, streamSource } from './loot.js';
 import { advanceRoute, planCycle, type CyclePlan } from './route.js';
 import {
@@ -38,6 +38,9 @@ import { nextFloat } from './rng.js';
 import type { MaterialTier } from './types.js';
 
 export type SessionMode = 'ship' | 'zone';
+
+/** 0.2 fuel per second: a full 100-unit tank in a little over eight minutes. */
+const FUEL_PER_TICK = 0.2 / 40;
 
 export interface Session {
   state: GameState;
@@ -77,10 +80,28 @@ function ensurePlan(session: Session): CyclePlan | null {
   return session.plan;
 }
 
+export type LandResult = 'ok' | 'unknown-zone' | 'no-fuel';
+
+/**
+ * Fuel is the brief's "soft travel cost": crossing to another planet costs, and
+ * it refills while docked. Soft is the operative word — it paces how often you
+ * hop between worlds and never gates you out of the zone you are working.
+ */
+export function travelCostFor(session: Session, zoneId: string): number {
+  return travelCost(session.state.currentZone, zoneId);
+}
+
 export function landInZone(session: Session, zoneId: string): boolean {
+  return landInZoneChecked(session, zoneId) === 'ok';
+}
+
+export function landInZoneChecked(session: Session, zoneId: string): LandResult {
   const zone = getZone(zoneId);
   const progress = session.state.zones[zoneId];
-  if (!progress?.discovered) return false;
+  if (!progress?.discovered) return 'unknown-zone';
+  const cost = travelCostFor(session, zoneId);
+  if (cost > session.state.resources.fuel) return 'no-fuel';
+  session.state.resources.fuel -= cost;
   const d = derive(session.state);
   syncPlayerDefences(session.state, d);
   const p = session.state.player.defences;
@@ -91,7 +112,7 @@ export function landInZone(session: Session, zoneId: string): boolean {
   session.state.currentZone = zoneId;
   session.mode = 'zone';
   session.feed.push(`Landing: ${zone.name}`);
-  return true;
+  return 'ok';
 }
 
 export function returnToShip(session: Session): void {
@@ -132,6 +153,9 @@ export function tickSession(session: Session, input: InputFrame, ticks = 1): Tic
       }
       if (outcome.levelled) out.levelled = true;
     }
+    if (session.mode === 'ship' && state.resources.fuel < d.fuelMax) {
+      state.resources.fuel = Math.min(d.fuelMax, state.resources.fuel + FUEL_PER_TICK * ticks);
+    }
     state.tick += ticks;
     state.lastSeenMs += ticks * TICK_MS;
     return out;
@@ -150,6 +174,13 @@ export function tickSession(session: Session, input: InputFrame, ticks = 1): Tic
         }
         if (outcome.levelled) out.levelled = true;
       }
+    }
+
+    if (session.mode === 'ship' && state.resources.fuel < d.fuelMax) {
+      // Refuelling is deliberately unhurried: a full tank from empty is about
+      // eight minutes docked, which prices a planet hop without ever blocking
+      // the zone you are already working.
+      state.resources.fuel = Math.min(d.fuelMax, state.resources.fuel + FUEL_PER_TICK);
     }
 
     if (session.arena && session.mode === 'zone') {
@@ -295,13 +326,11 @@ function onBossDown(session: Session, d: Derived, out: TickResult): void {
   state.stats.itemsDropped += 1;
   out.notices.push(`${boss.name} down. Signature recovered: ${sig.name}`);
 
-  // Clearing a zone opens the next node and makes this one farmable.
-  const idx = zone.planetId;
-  void idx;
-  for (const z of Object.keys(state.zones)) {
-    if (state.zones[z]!.discovered) continue;
-    state.zones[z]!.discovered = true;
-    break;
+  // Clearing a zone opens the next node in order and makes this one farmable.
+  const next = nextZoneAfter(arena.zoneId);
+  if (next && state.zones[next] && !state.zones[next]!.discovered) {
+    state.zones[next]!.discovered = true;
+    out.notices.push(`Charted: ${getZone(next).name}.`);
   }
   out.notices.push(`${zone.name} is now available as an idle route.`);
 }

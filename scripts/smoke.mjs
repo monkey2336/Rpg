@@ -92,6 +92,7 @@ const checks = [
   ['full window hides while docked', report.fullVisible === false],
   ['full window restores', report.restoredVisible === true],
   ['boss encounter rendered', report.arena?.bossSpawned === true],
+  ['all three bosses reachable and rendered', !!report.bosses && Object.values(report.bosses).every(Boolean) && Object.keys(report.bosses).length === 3],
   ['route runs while docked', !!report.route?.zoneId],
   ['docked screens render', report.screensCaptured === 5],
   ['every audio cue is audible', audioOk(report.audio).ok],

@@ -27,6 +27,7 @@ import {
 } from './combat.js';
 import type { ResolvedWeapon } from './derive.js';
 import { PATTERNS, getBoss } from './content/bosses.js';
+import type { BossPhaseDef } from './types.js';
 import { getEnemy } from './content/enemies.js';
 import { WEAPON_ARCHETYPES } from './content/weapons.js';
 import { getZone } from './content/zones.js';
@@ -67,6 +68,7 @@ export type ArenaEventType =
   | 'resolve'
   | 'phase'
   | 'vent'
+  | 'warded'
   | 'boss-ready'
   | 'boss-down'
   | 'mined'
@@ -149,6 +151,8 @@ export interface ArenaState {
   patternCooldowns: Record<string, number>;
   outcome: 'running' | 'cleared' | 'down';
   events: ArenaEvent[];
+  /** Set by the active boss phase; 1 unless something has gone wrong with it. */
+  gravityMult: number;
   /** Presentation-only; the sim writes these, never reads them. */
   shake: number;
   hitstop: number;
@@ -313,6 +317,7 @@ export function createArena(zoneId: string, seed: number, playerDefences: Defenc
     patternCooldowns: {},
     outcome: 'running',
     events: [],
+    gravityMult: 1,
     shake: 0,
     hitstop: 0,
     armorRegen: 0,
@@ -498,6 +503,17 @@ function applyPhase(a: ArenaState, e: Entity, phase: number): void {
   e.def.shieldMax = def.defences.shieldMax * p.shieldMult;
   e.def.shield = Math.min(e.def.shield, e.def.shieldMax);
   for (const w of e.weakPoints) w.exposed = p.exposes.includes(w.id);
+  // A window starts closed and on a full period, so entering a phase never
+  // hands the player a free opening they did not earn.
+  e.ai.winOpen = 0;
+  e.ai.winCd = p.window ? p.window.periodTicks : 0;
+  e.ai.respawnCd = p.respawnTicks ?? 0;
+  spawnEscort(a, e, p);
+  e.iframes = Math.max(e.iframes, 34);
+  a.shake = Math.max(a.shake, 14);
+}
+
+function spawnEscort(a: ArenaState, e: Entity, p: BossPhaseDef): void {
   for (const s of p.spawns) {
     for (let i = 0; i < s.count; i++) {
       const ang = nextRange(a.rng, 0, TAU);
@@ -507,8 +523,6 @@ function applyPhase(a: ArenaState, e: Entity, phase: number): void {
       a.entities.push(add);
     }
   }
-  e.iframes = Math.max(e.iframes, 34);
-  a.shake = Math.max(a.shake, 14);
 }
 
 /* -------------------------------- damage ---------------------------------- */
@@ -556,6 +570,12 @@ function damageEntity(
   critMult: number,
 ): HitResult {
   if (e.dead || e.iframes > 0) return NO_HIT;
+  if (e.kind === 'boss' && bossIsWarded(a, e)) {
+    // Warded rather than immune-and-silent: the player gets a distinct cue and
+    // a number-free spark, so "shoot the escort" is learnable from one attempt.
+    emit(a, { type: 'warded', x: hx, y: hy, z: hz, damageType: type, id: e.id });
+    return NO_HIT;
+  }
   const wp = hitWeakPoint(e, hx, hy, hz);
   const weakMult = wp ? wp.multiplier : 1;
   const res = applyDamage(e.def, amount, type, { crit, critMult, weakMult });
@@ -623,6 +643,13 @@ function registerHit(a: ArenaState, w: ResolvedWeapon, res: HitResult, crit: boo
   const scale = res.weak ? 1.7 : res.killed ? 1.35 : crit ? 1.2 : 1;
   const ticks = Math.round(w.hitstop * HITSTOP_TICKS_PER_FRAME * scale);
   a.hitstop = Math.max(a.hitstop, Math.min(9, ticks));
+}
+
+/** True while a phase's escort is alive and that phase wards the boss. */
+export function bossIsWarded(a: ArenaState, e: Entity): boolean {
+  const phase = getBoss(e.defId).phases[e.phase];
+  if (!phase?.invulnerableWhileAdds) return false;
+  return a.entities.some((o) => o.faction === 'hostile' && !o.dead && o.kind !== 'boss');
 }
 
 function damagePlayer(a: ArenaState, amount: number, type: DamageType): void {
@@ -979,22 +1006,47 @@ function stepBoss(a: ArenaState, e: Entity, p: Entity): void {
     e.vx = e.vz = 0;
   }
 
-  // Phase 1's knowledge check: it vents to cool, dropping the shield and
-  // exposing the vents on its flanks for a short, readable window. Learn it and
-  // the fight halves; ignore it and the plate never lets you through.
-  if (e.phase === 0) {
-    e.ai.ventCd = (e.ai.ventCd ?? 0) - 1;
-    if ((e.ai.vent ?? 0) > 0) {
-      e.ai.vent = (e.ai.vent ?? 0) - 1;
-      e.def.shieldCooldown = 40;
-      if ((e.ai.vent ?? 0) === 0) {
-        for (const w of e.weakPoints) if (w.id === 'vents') w.exposed = false;
+  // The phase's knowledge check, if it has one. A window opens a named weak
+  // point on a cycle; whether that reads as venting heat or drawing breath is
+  // a matter of naming, so the mechanic lives in data rather than in here.
+  const win = phase.window;
+  if (win) {
+    e.ai.winCd = (e.ai.winCd ?? win.periodTicks) - 1;
+    if ((e.ai.winOpen ?? 0) > 0) {
+      e.ai.winOpen = (e.ai.winOpen ?? 0) - 1;
+      if (win.suppressShield) e.def.shieldCooldown = 40;
+      if (win.pull) {
+        // Dragged toward it. The moment it is open is the moment it is pulling
+        // you into everything else it does, which is the trade.
+        const dir = atan2(e.z - p.z, e.x - p.x);
+        p.x += cos(dir) * win.pull;
+        p.z += sin(dir) * win.pull;
+        clampToArena(p);
       }
-    } else if ((e.ai.ventCd ?? 0) <= 0) {
-      e.ai.vent = 92;
-      e.ai.ventCd = 300;
-      for (const w of e.weakPoints) if (w.id === 'vents' && !w.broken) w.exposed = true;
-      emit(a, { type: 'vent', x: e.x, y: e.y + e.height, z: e.z, text: 'venting', id: e.id });
+      if ((e.ai.winOpen ?? 0) === 0) {
+        for (const w of e.weakPoints) if (w.id === win.weakPointId) w.exposed = false;
+      }
+    } else if ((e.ai.winCd ?? 0) <= 0) {
+      e.ai.winOpen = win.openTicks;
+      e.ai.winCd = win.periodTicks;
+      for (const w of e.weakPoints) if (w.id === win.weakPointId && !w.broken) w.exposed = true;
+      emit(a, { type: 'vent', x: e.x, y: e.y + e.height, z: e.z, text: win.label, id: e.id });
+    }
+  }
+
+  // Escort respawn. The countdown only runs once the escort is entirely gone,
+  // so clearing it always buys a window of exactly `respawnTicks` — which is
+  // the whole fight when the phase also wards the boss.
+  if (phase.respawnTicks && phase.spawns.length > 0) {
+    const alive = a.entities.some((o) => o.faction === 'hostile' && !o.dead && o.kind !== 'boss');
+    if (alive) {
+      e.ai.respawnCd = phase.respawnTicks;
+    } else {
+      e.ai.respawnCd = (e.ai.respawnCd ?? phase.respawnTicks) - 1;
+      if ((e.ai.respawnCd ?? 0) <= 0) {
+        e.ai.respawnCd = phase.respawnTicks;
+        spawnEscort(a, e, phase);
+      }
     }
   }
 
@@ -1025,6 +1077,8 @@ function stepBoss(a: ArenaState, e: Entity, p: Entity): void {
       e.ai.patternCd = 40;
     }
   }
+
+  a.gravityMult = phase.gravityMult ?? 1;
 
   if (phase.arenaDps > 0) {
     // Rising kiln heat: an arena-wide pressure that makes phase 3 a timer.
@@ -1237,7 +1291,7 @@ export function stepArena(a: ArenaState, input: InputFrame, ctx: StepContext): A
   // --- physics ---
   for (const e of a.entities) {
     if (e.dead) continue;
-    e.vy -= GRAVITY;
+    e.vy -= GRAVITY * a.gravityMult;
     const moved = Math.sqrt(e.vx * e.vx + e.vz * e.vz);
     e.gait += moved;
     e.x += e.vx;
@@ -1273,6 +1327,8 @@ export function stepArena(a: ArenaState, input: InputFrame, ctx: StepContext): A
   }
 
   // --- hostile AI ---
+  // Gravity is a boss-phase property, so it reverts the moment none is driving it.
+  if (!a.bossSpawned) a.gravityMult = 1;
   for (const e of a.entities) {
     if (e.dead || e.faction !== 'hostile' || e.stunned > 0) continue;
     stepHostile(a, e, p);

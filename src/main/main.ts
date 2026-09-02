@@ -168,7 +168,6 @@ async function smokeTest(): Promise<void> {
     await wait(6000);
     const bossShot = await windows.full.webContents.capturePage();
     await writeFile(`${outDir}/boss.png`, bossShot.toPNG());
-    clearInterval(driving);
 
     report.arena = {
       entities: host.session.arena?.entities.length ?? 0,
@@ -177,6 +176,28 @@ async function smokeTest(): Promise<void> {
       bossPhase: host.session.arena?.bossPhase,
       outcome: host.session.arena?.outcome,
     };
+
+    // The other two bosses, so their meshes and set-piece framing get looked at
+    // rather than assumed. Each is forced straight to its beacon.
+    const bossesSeen: Record<string, boolean> = { 'kiln-warden': true };
+    report.bosses = bossesSeen;
+    for (const zoneId of ['the-throats', 'lantern-derelict']) {
+      runCommand(host, 'return-to-ship');
+      host.session.state.zones[zoneId]!.discovered = true;
+      runCommand(host, 'land', { zoneId });
+      const arena2 = host.session.arena;
+      if (!arena2) continue;
+      arena2.kills = 9999;
+      arena2.minedCount = 9999;
+      arena2.scannedCount = 9999;
+      const untilBoss = Date.now() + 20_000;
+      while (!host.session.arena?.bossSpawned && Date.now() < untilBoss) await wait(200);
+      await wait(5000);
+      const shot = await windows.full.webContents.capturePage();
+      await writeFile(`${outDir}/boss-${zoneId}.png`, shot.toPNG());
+      bossesSeen[zoneId] = !!host.session.arena?.bossSpawned;
+    }
+    clearInterval(driving);
 
     // Clear the zone outright so the widget capture shows a running route.
     host.session.state.zones['ochre-shelf']!.cleared = true;

@@ -362,6 +362,149 @@ export function buildHostile(defId: string): Actor {
       legs = insectLegs(g, 6, 64, 78, 13, 76, mat(0x241c14));
       break;
     }
+    case 'shield-pylon': {
+      // Anchored, lit, and obviously the thing to shoot: a tripod base with a
+      // ward emitter that reads as a light source rather than a creature.
+      const base = taper(5, 11, 12, plate, 3);
+      base.position.y = 6;
+      g.add(base);
+      skin.push(base);
+      const mast = taper(3, 4.5, 26, plate, 5);
+      mast.position.y = 24;
+      g.add(mast);
+      skin.push(mast);
+      const emitter = new THREE.Mesh(
+        new THREE.OctahedronGeometry(7, 0),
+        mat(0x131a20, { emissive: 0x6fa9c9, emissiveIntensity: 2.2 }),
+      );
+      emitter.position.y = 41;
+      g.add(emitter);
+      glows.push(emitter);
+      const ward = new THREE.Mesh(new THREE.TorusGeometry(10, 1, 4, 16), mat(0x101418, { emissive: 0x6fa9c9, emissiveIntensity: 1.4 }));
+      ward.rotation.x = Math.PI / 2;
+      ward.position.y = 41;
+      g.add(ward);
+      glows.push(ward);
+      break;
+    }
+
+    case 'the-bellows': {
+      // A lung: a ribbed concertina barrel rooted into the floor, with a flared
+      // throat aimed forward and up. It never walks in phase one, so the roots
+      // do the work the legs would.
+      const body = taper(46, 62, 130, plate, 8);
+      body.position.y = 74;
+      g.add(body);
+      skin.push(body);
+
+      // Concertina ribs — the read is "this thing expands and contracts".
+      for (let i = 0; i < 7; i++) {
+        const t = i / 6;
+        const r = 50 + Math.sin(t * Math.PI) * 16;
+        const rib = new THREE.Mesh(new THREE.TorusGeometry(r, 6, 5, 10), mat(0x241c14));
+        rib.rotation.x = Math.PI / 2;
+        rib.position.y = 22 + i * 20;
+        g.add(rib);
+        skin.push(rib);
+      }
+
+      // The throat: a wide flare on the front, open toward the player. The
+      // lining sits inside the flare and shares its tilt — a disc facing the
+      // camera regardless of the cone it belongs to reads as a sticker.
+      const THROAT_TILT = -1.15;
+      const throat = new THREE.Mesh(new THREE.CylinderGeometry(34, 14, 56, 10, 1, true), mat(0x2c2118));
+      throat.material.side = THREE.DoubleSide;
+      throat.position.set(48, 148, 0);
+      throat.rotation.z = THROAT_TILT;
+      throat.castShadow = true;
+      g.add(throat);
+      skin.push(throat);
+
+      const lining = new THREE.Mesh(new THREE.CircleGeometry(29, 14), mat(0x2a1109, { emissive: 0xa8431f, emissiveIntensity: 0.3 }));
+      lining.position.set(62, 150, 0);
+      lining.rotation.set(0, Math.PI / 2, -THROAT_TILT - Math.PI / 2);
+      g.add(lining);
+      glows.push(lining);
+      // A lip around the flare so it has an edge to catch the sun.
+      const lip = new THREE.Mesh(new THREE.TorusGeometry(33, 3.5, 5, 12), mat(0x1d1610));
+      lip.position.set(60, 150, 0);
+      lip.rotation.set(0, Math.PI / 2, -THROAT_TILT - Math.PI / 2);
+      g.add(lip);
+      skin.push(lip);
+
+      // The crown sits on a neck rising out of the body, not in mid-air above it.
+      const neck = taper(20, 34, 52, mat(0x241c14), 8);
+      neck.position.y = 160;
+      g.add(neck);
+      skin.push(neck);
+      const cap = new THREE.Mesh(new THREE.CircleGeometry(21, 12), mat(0x150f0a, { emissive: 0x7d9a3f, emissiveIntensity: 0.28 }));
+      cap.rotation.x = -Math.PI / 2;
+      cap.position.y = 186.5;
+      g.add(cap);
+      glows.push(cap);
+      const crown = new THREE.Mesh(new THREE.TorusGeometry(21, 5, 6, 12), mat(0x1d1610));
+      crown.rotation.x = Math.PI / 2;
+      crown.position.y = 186;
+      g.add(crown);
+      skin.push(crown);
+
+      const bulb = sphere(26, mat(0x1c1410, { emissive: 0x8fae4b, emissiveIntensity: 0.2 }), 10);
+      bulb.position.set(-34, 28, 0);
+      bulb.scale.set(1, 0.8, 1);
+      g.add(bulb);
+      glows.push(bulb);
+
+      // Roots: it is gripping the floor, not standing on it. They double as
+      // legs once it uproots, which is what phase two is.
+      legs = insectLegs(g, 7, 52, 34, 9, 30, mat(0x1a130e));
+      break;
+    }
+
+    case 'the-choir': {
+      // A cargo gantry: a tall spine, a counterweight arm, and a sorting claw.
+      // Industrial, not animal — nothing about it should look alive.
+      const spine = taper(14, 22, 170, plate, 6);
+      spine.position.y = 92;
+      g.add(spine);
+      skin.push(spine);
+
+      const base = taper(30, 44, 22, mat(0x2a2119), 8);
+      base.position.y = 11;
+      g.add(base);
+      skin.push(base);
+
+      // Counterweight arm, offset so the silhouette is asymmetric and readable.
+      const arm = box(112, 9, 12, mat(0x3d3226));
+      arm.position.set(-14, 152, 0);
+      g.add(arm);
+      skin.push(arm);
+      const weight = box(26, 30, 26, mat(0x241c15));
+      weight.position.set(-48, 152, 0);
+      g.add(weight);
+      skin.push(weight);
+
+      // The claw it sorts with.
+      for (const side of [-1, 1]) {
+        const finger = box(30, 5, 5, mat(0x2e2419));
+        finger.position.set(36, 146, side * 9);
+        finger.rotation.z = -0.35;
+        g.add(finger);
+        skin.push(finger);
+      }
+
+      const core = new THREE.Mesh(new THREE.TorusGeometry(20, 5, 8, 18), mat(0x101418, { emissive: 0x6fa9c9, emissiveIntensity: 0.35 }));
+      core.rotation.y = Math.PI / 2;
+      core.position.y = 94;
+      g.add(core);
+      glows.push(core);
+
+      const lamp = sphere(9, mat(0x101418, { emissive: 0x6fa9c9, emissiveIntensity: 0.4 }), 10);
+      lamp.position.set(-48, 152, 0);
+      g.add(lamp);
+      glows.push(lamp);
+      break;
+    }
+
     default: {
       const body = box(16, 24, 16, shell);
       body.position.y = 12;

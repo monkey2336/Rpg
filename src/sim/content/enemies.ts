@@ -119,6 +119,25 @@ export const ENEMY_DEFS: readonly EnemyDef[] = [
     matDrop: 4,
     dataDrop: 1,
   }),
+  def({
+    id: 'shield-pylon',
+    name: 'Warding Pylon',
+    kind: 'artillery',
+    radius: 13,
+    height: 46,
+    // Anchored. It exists to be shot, not to chase.
+    speed: 0,
+    defences: { shield: 220, shieldMax: 220, shieldRegen: 0, shieldDelay: 999, armor: 40, armorMax: 40, health: 150, healthMax: 150 },
+    contactDamage: 0,
+    contactType: 'arc',
+    attackInterval: 130,
+    attackDamage: 14,
+    attackType: 'arc',
+    attackRange: 620,
+    xp: 18,
+    matDrop: 8,
+    dataDrop: 4,
+  }),
 ];
 
 const BY_ID = new Map(ENEMY_DEFS.map((e) => [e.id, e]));

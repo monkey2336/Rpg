@@ -23,6 +23,7 @@ export type CueName =
   | 'impact-armor'
   | 'impact-health'
   | 'impact-weak'
+  | 'warded'
   | 'kill'
   | 'reload'
   | 'dodge'
@@ -175,6 +176,12 @@ export const CUES: Record<CueName, Cue> = {
     noise(c, d, t, { dur: 0.16, gain: 0.2 * o.gain, from: 1800, to: 5200, q: 2 });
   },
 
+  // A deflection. Dull, short and pitched below every impact cue, so it never
+  // gets mistaken for a hit that landed.
+  warded: (c, d, t, o) => {
+    tone(c, d, t, { type: 'sine', from: 320 * o.vary, to: 190, dur: 0.1, gain: 0.14 * o.gain });
+    noise(c, d, t, { dur: 0.07, gain: 0.1 * o.gain, from: 1200, to: 500, q: 3.5 });
+  },
   kill: (c, d, t, o) => {
     noise(c, d, t, { dur: 0.28, gain: 0.22 * o.gain, from: 900 * o.vary, to: 90, q: 1, type: 'lowpass' });
     tone(c, d, t, { type: 'sine', from: 180, to: 40, dur: 0.3, gain: 0.18 * o.gain });
@@ -436,6 +443,9 @@ export class AudioEngine {
           break;
         case 'weak':
           this.play('impact-weak');
+          break;
+        case 'warded':
+          this.play('warded', { gain: 0.6 });
           break;
         case 'kill':
           this.play('kill', { gain: 0.7 });

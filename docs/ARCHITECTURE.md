@@ -288,6 +288,42 @@ the cost of the world holding still on a connect, and it is the right trade.
 
 ---
 
+## 5e. The boss pipeline
+
+A boss is data. `BossDef` carries its geometry, defences, weak points and phases;
+`stepBoss` is generic and has no knowledge of any particular boss.
+
+A phase may change: speed, attack cadence, armour and shield multipliers, which
+weak points are exposed, what it spawns, arena damage-over-time, arena gravity,
+and which telegraph patterns it may use. It may also declare:
+
+- **`window`** — a timed exposure that opens a named weak point on a cycle, with
+  optional shield suppression and an optional pull toward the boss. The Kiln
+  Warden venting to cool and the Bellows drawing breath are the same mechanic
+  with different numbers; both are this field. It used to be `if (e.phase === 0)`
+  against a weak point named `'vents'`, which is a special case, not a mechanic.
+- **`invulnerableWhileAdds`** with **`respawnTicks`** — the boss cannot be hurt
+  while any escort lives, and the escort returns a fixed time after being
+  *fully* cleared. Counting from full clear rather than on a free-running timer
+  is the difference between "kill them fast and you get a window" and "the boss
+  is permanently immune", which is what the first version produced.
+- **`gravityMult`** — the arena's physics as a phase property.
+
+Deflected shots emit a distinct `warded` event rather than silently doing
+nothing, so "shoot the escort" is learnable from one attempt.
+
+Telegraph patterns stay a closed vocabulary of five shapes. A new boss adds new
+*entries* to `PATTERNS` — different shape, damage type and numbers — never new
+shapes, because the point of the vocabulary is that learning one boss teaches you
+how to read the next.
+
+> Enforced by `test/bosses.test.ts`: every boss is well formed, phases descend,
+> each phase changes a mechanic rather than a number, every referenced pattern,
+> spawn and weak point exists, and the pull / ward / gravity mechanics are each
+> owned by exactly one boss so a fourth boss cannot be a reskin.
+
+---
+
 ## 6. Snapshots
 
 Renderers never see `GameState`. They receive one of two projections built by the

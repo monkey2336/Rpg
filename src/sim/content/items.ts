@@ -48,6 +48,7 @@ export const ITEM_BASES: readonly ItemBase[] = [
   { id: 'censer-clay', name: 'Clay Censer', archetypeId: 'censer', minRarity: 'common', flavor: 'Unglazed. Breaks on anything, which is the point.' },
   { id: 'censer-sealed', name: 'Sealed Censer', archetypeId: 'censer', minRarity: 'refined', flavor: 'Waxed shut. The rot inside has been fermenting for a while.' },
   { id: 'vespers-coil', name: 'Coil Vespers', archetypeId: 'vespers', minRarity: 'common', flavor: 'Surplus shield-breaker. Whines before it fires.' },
+  { id: 'censer-throat', name: 'Throat Censer', archetypeId: 'censer', minRarity: 'marked', flavor: 'Lined with something that was breathing when they cut it out.' },
   { id: 'maw-short', name: 'Short Maw', archetypeId: 'maw', minRarity: 'common', flavor: 'Cut down twice. Once at the factory, once by someone in a hurry.' },
   { id: 'obelisk-mark', name: 'Marked Obelisk', archetypeId: 'obelisk', minRarity: 'marked', flavor: 'A rail with a name stamped on the receiver. Not yours.' },
   { id: 'reliquary-small', name: 'Small Reliquary', archetypeId: 'reliquary', minRarity: 'refined', flavor: 'Holds five. Releases five. Asks nothing.' },
@@ -76,6 +77,30 @@ export const SIGNATURES: Record<string, SignatureDef> = {
       { id: 'sig-kiln', label: 'Kiln-Fed', stat: 'statusChance', value: 2.5 },
     ],
     flavor: 'Cut from the Warden\'s own vent assembly. It still runs hot when the sun is up.',
+  },
+  'the-drawn-breath': {
+    id: 'the-drawn-breath',
+    name: 'The Drawn Breath',
+    archetypeId: 'censer',
+    rarity: 'relic',
+    affixes: [
+      { id: 'sig-lung', label: 'Lung Capacity', stat: 'magazine', value: 5, flat: true },
+      { id: 'sig-spore', label: 'Spore-Packed', stat: 'statusChance', value: 3.1 },
+      { id: 'sig-draw', label: 'Long Draw', stat: 'damage', value: 1.28 },
+    ],
+    flavor: 'A censer wound from the Bellows\' own throat lining. It exhales when you do.',
+  },
+  'the-sorting-arm': {
+    id: 'the-sorting-arm',
+    name: 'The Sorting Arm',
+    archetypeId: 'vespers',
+    rarity: 'relic',
+    affixes: [
+      { id: 'sig-manifest', label: 'Manifest Lock', stat: 'fireRate', value: 1.26 },
+      { id: 'sig-ward', label: 'Ward-Breaker', stat: 'damage', value: 1.31 },
+      { id: 'sig-tally', label: 'Running Tally', stat: 'crit', value: 0.09, flat: true },
+    ],
+    flavor: 'One arm off the Choir, still counting. It sorts shielding from everything behind it.',
   },
 };
 

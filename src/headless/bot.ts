@@ -11,7 +11,7 @@
  * points its notional camera where it wants to go and pushes forward, so it
  * drives the exact same code path a human does.
  */
-import { horizDist, NEUTRAL_INPUT, weakPointPos, type ArenaState, type InputFrame } from '../sim/arena.js';
+import { bossIsWarded, horizDist, NEUTRAL_INPUT, weakPointPos, type ArenaState, type InputFrame } from '../sim/arena.js';
 import { getZone } from '../sim/content/zones.js';
 import { atan2, PI } from '../sim/trig.js';
 import type { Session } from '../sim/sim.js';
@@ -138,6 +138,10 @@ function nearestHostile(a: ArenaState, x: number, z: number) {
       closestAdd = e;
     }
   }
+  // A warded boss cannot be hurt at all, so shooting it is not a suboptimal
+  // choice, it is a wasted fight. Clear the escort at any range — which is
+  // exactly what a player works out on their first attempt.
+  if (closestAdd && boss && bossIsWarded(a, boss)) return closestAdd;
   if (closestAdd && bestD < ADD_THREAT_RANGE) return closestAdd;
   return boss ?? closestAdd;
 }
