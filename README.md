@@ -42,6 +42,17 @@ directory); `Cenotaph-0.1.0-portable.exe` runs from anywhere.
 Saves live in `%APPDATA%\Cenotaph\saves` and are **not** removed when you
 uninstall.
 
+**Windows will refuse to run it the first time.** The build is unsigned — code
+signing needs a certificate that costs money and belongs to a real publisher —
+so SmartScreen shows "Windows protected your PC". Click **More info**, then
+**Run anyway**. There is no way around that short of buying a certificate, and
+you should be suspicious of any unsigned executable you did not build yourself,
+including this one: the honest reassurance is that you can read every line that
+went into it and rebuild it yourself with `npm run pack:win`.
+
+It also uses Electron's default icon. A real icon is an art task, and a
+placeholder would be worse than none.
+
 **Or build it yourself**, on Windows:
 
 ```bash
