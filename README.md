@@ -29,15 +29,62 @@ and offline progression that provably matches live play.
 | Travel layer: fuel as a soft cost | Done. Crossing planets costs fuel; it refills while docked. Same-planet travel is free. |
 | Audio | Combat audio, weapon feel, and a drone score with a distinct bed per place — all synthesised at runtime, no sample files. |
 
-## Running it
+## Running it on Windows
+
+The brief says Windows first, and that is the primary target.
+
+**Get a build.** Every push builds a Windows installer and a portable zip on a
+real Windows runner — grab them from the Actions tab under the `windows`
+workflow, artifact `cenotaph-windows`. `Cenotaph-0.1.0-x64.exe` is a normal
+installer (Start Menu entry, desktop shortcut, choose your own install
+directory); `Cenotaph-0.1.0-portable.exe` runs from anywhere.
+
+Saves live in `%APPDATA%\Cenotaph\saves` and are **not** removed when you
+uninstall.
+
+**Or build it yourself**, on Windows:
+
+```bash
+npm ci
+npm run pack:win     # release/Cenotaph-0.1.0-x64.exe + portable
+```
+
+**Or just run it from source**, on any platform:
 
 ```bash
 npm install
-npm start          # build and launch the game
+npm start            # build and launch the game
 ```
 
+### What has and has not been verified on Windows
+
+Honesty matters more here than reassurance. This was developed and tested on
+Linux, so:
+
+- **Verified**: the package layout. A packaged build (asar, vendored Three.js,
+  ESM preload, `file://` renderer paths) boots and runs the full smoke suite —
+  WebGL, all three bosses, correct widget geometry, every docked screen. That is
+  the same layout the Windows build ships, and packaging is where this normally
+  breaks.
+- **Verified**: the whole simulation, on any platform, with no window at all.
+  The Windows CI job runs the offline-parity check, a soak and the balance dump
+  before it packages anything.
+- **Not verified on real Windows**: the widget's transparent, frameless,
+  always-on-top behaviour. It is written to the documented Windows contract —
+  `screen-saver` always-on-top level so it sits above full-screen apps,
+  `setIgnoreMouseEvents(forward)` for click-through, non-focusable so it never
+  steals focus, corner-plus-offset placement so it survives a monitor being
+  unplugged — but nobody has watched it do that on Windows. Transparent
+  always-on-top windows are the part of Electron most likely to behave
+  differently there, particularly with hardware acceleration disabled.
+
+If the widget misbehaves on your machine, that is the first place to look, and
+`src/main/windows.ts` is where every one of those flags lives.
+
+## Running it
+
 ```bash
-npm test           # 98 tests: parity, determinism, arena geometry, hitstop, bosses, travel, loot, saves
+npm test           # 110 tests: parity, determinism, arena geometry, hitstop, bosses, travel, loot, saves
 npm run smoke      # boots the real app, plays it, asserts the window contract,
                    # and renders every audio cue offline to check it is audible
 npm run sim -- balance   # damage matrix, weapon table, hostile TTK
@@ -102,7 +149,7 @@ src/preload/     the renderer's entire view of the outside world (.mts, see note
 src/renderer/    full-mode shell, 3D scene, actors and effects; the corner widget
   vendor/        Three.js, vendored (file:// page, script-src 'self', no network)
 src/headless/    CLI and the scripted reference bot
-test/            98 tests
+test/            110 tests
 docs/            DESIGN.md (decisions, answers to the brief's open questions)
                  ARCHITECTURE.md (the contracts the tests enforce)
 ```

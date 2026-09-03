@@ -412,6 +412,42 @@ when a display is unplugged or rearranged; a corner does not.
 
 ---
 
+## 8b. Packaging, and Windows
+
+The brief targets Windows first. Two things follow.
+
+**The game has no runtime dependencies.** Three.js is vendored into `dist` at
+build time and Electron is the host, so both are devDependencies and the asar is
+`dist/src` plus a manifest — 60 entries, no `node_modules`, no sources, no tests,
+no source maps. Leaving Electron in `optionalDependencies` made electron-builder
+treat it as production and drag 1,404 files of its transitive dependencies into
+the package, doubling it to 216MB. That is the default failure mode and it is
+silent.
+
+**A Windows installer is built on Windows.** NSIS and rcedit both need Wine, so
+a Linux box can cross-build a working zip (`npm run pack:win:cross`, with the
+executable metadata rewrite disabled) but not a real installer.
+`.github/workflows/windows.yml` runs on `windows-latest`, executes the full test
+suite plus the headless parity, soak and balance checks, and only then packages.
+
+**Single instance, always.** Two copies of the game means two `SimHost`s
+autosaving to the same file every twenty seconds, each unaware of the other, and
+the loser's writes land on the winner's. On Windows a second launch is one stray
+double-click away, and "zero save loss, ever" does not survive it. A second
+instance focuses the first and exits.
+
+**What Windows-specific behaviour rests on.** The widget uses the `screen-saver`
+always-on-top level (the plain flag sits below full-screen apps),
+`setIgnoreMouseEvents(true, { forward: true })` for click-through that still
+receives hover, `focusable: false` so it never steals focus, and corner-plus-offset
+placement so it survives a display being unplugged. All of that is the documented
+Windows contract; none of it has been watched on real Windows from this
+environment, and transparent always-on-top windows are the part of Electron most
+likely to differ there. `src/main/windows.ts` is where every one of those flags
+lives.
+
+---
+
 ## 9. A note on `preload.mts`
 
 The preload is `.mts`, compiling to `.mjs`, on purpose. Electron loads preloads

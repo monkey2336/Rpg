@@ -1,0 +1,63 @@
+# Packaging, Windows first — which is what the brief asks for.
+#
+# Two Windows targets, deliberately:
+#   nsis     a normal installer, for people who want a Start Menu entry
+#   portable a single .exe that runs from anywhere and writes its save to
+#            %APPDATA%\Cenotaph like the installed build does
+#
+# The build ships dist/ (compiled JS plus the vendored Three.js and the
+# renderer's html/css) and nothing else — no sources, no tests, no maps.
+appId: com.cenotaph.game
+productName: Cenotaph
+copyright: ""
+
+directories:
+  output: release
+  buildResources: build
+
+# The game has no runtime dependencies: Three.js is vendored into dist at build
+# time and Electron is the host. So the asar is dist/ and a manifest, and
+# nothing else — no node_modules, no sources, no tests, no source maps.
+files:
+  - dist/src/**/*
+  - package.json
+  - "!**/*.map"
+  - "!**/node_modules/**"
+
+# The game is entirely self-contained: no native modules, no runtime downloads,
+# no network. Compression is worth it because the payload is almost all Electron.
+compression: maximum
+asar: true
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+    - target: portable
+      arch: [x64]
+    # zip is the one Windows target that cross-builds from Linux without Wine,
+    # so it is what `npm run pack:win:cross` produces. The installer is built on
+    # a real Windows runner by .github/workflows/windows.yml, which is where a
+    # Windows installer should be built anyway.
+    - target: zip
+      arch: [x64]
+  # Electron's own icon is used when none is supplied; a real one is a Tier 3
+  # art task, not something to fake with a placeholder.
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Cenotaph
+  # Saves live in %APPDATA%\Cenotaph and are never touched by uninstall.
+  deleteAppDataOnUninstall: false
+
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
+
+linux:
+  target: [AppImage]
+  category: Game

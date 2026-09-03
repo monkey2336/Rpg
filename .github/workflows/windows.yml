@@ -1,0 +1,52 @@
+# Builds the Windows installer on Windows.
+#
+# A Windows installer can be cross-built from Linux only up to a point: NSIS and
+# rcedit both need Wine, so a Linux box can produce a working zip but not a
+# signed, icon-stamped, Start-Menu-installing .exe. This runs on a real Windows
+# runner so the artifact is the real thing.
+name: windows
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Typecheck, build, and test
+        run: |
+          npm run build
+          node --test dist/test/*.test.js
+
+      # Proves the sim is genuinely headless on Windows too: no window, no GPU,
+      # no Electron — just the simulation clearing a zone and checking that
+      # offline progression matches live play.
+      - name: Headless verification
+        run: |
+          node dist/src/headless/cli.js parity --hours 0.25,1,4
+          node dist/src/headless/cli.js soak --seeds 3
+          node dist/src/headless/cli.js balance
+
+      - name: Package
+        run: npx electron-builder --win --x64 --publish never
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cenotaph-windows
+          path: |
+            release/*.exe
+            release/*.zip
+          if-no-files-found: error
+          retention-days: 30

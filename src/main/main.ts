@@ -369,10 +369,31 @@ async function shutdown(): Promise<void> {
   app.exit(0);
 }
 
-app.whenReady().then(boot).catch((err) => {
-  console.error('failed to start:', err);
-  app.exit(1);
-});
+/**
+ * One instance, always.
+ *
+ * Two copies of the game means two SimHosts autosaving to the same file every
+ * twenty seconds, each unaware of the other, and the loser's writes land on top
+ * of the winner's. On Windows in particular a second launch is one stray
+ * double-click away, and "zero save loss, ever" does not survive it. A second
+ * instance hands its focus to the first and exits.
+ */
+if (!app.requestSingleInstanceLock()) {
+  app.exit(0);
+} else {
+  app.on('second-instance', () => {
+    if (!windows?.full || windows.full.isDestroyed()) return;
+    mode = 'full';
+    setMode(windows, 'full', host.session.state.settings);
+    if (windows.full.isMinimized()) windows.full.restore();
+    windows.full.focus();
+  });
+
+  app.whenReady().then(boot).catch((err) => {
+    console.error('failed to start:', err);
+    app.exit(1);
+  });
+}
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') void shutdown();
