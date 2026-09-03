@@ -21,7 +21,7 @@ import { landInZone, newSession, tickSession, type Session } from '../sim/sim.js
 import { getZone } from '../sim/content/zones.js';
 import { formatDuration, formatNumber } from '../sim/numbers.js';
 import { ENEMY_DEFS, effectiveHp } from '../sim/content/enemies.js';
-import { WEAPON_ARCHETYPES } from '../sim/content/weapons.js';
+import { WEAPON_ARCHETYPES, archetypeVerb, getArchetype } from '../sim/content/weapons.js';
 import { DAMAGE_TYPES, STATUS_DEFS, typeMultiplier } from '../sim/content/damage.js';
 import { getBoss } from '../sim/content/bosses.js';
 import { botInput } from './bot.js';
@@ -58,24 +58,32 @@ interface SoakRun {
  * boss; it says the player skipped two zones of progression. The soak equips
  * something plausible for where it is being run instead.
  */
-function equipFor(session: Session, zoneId: string): void {
+function equipFor(session: Session, zoneId: string, archetypeId?: string): void {
   const zone = getZone(zoneId);
   const item = session.state.inventory.items[0];
-  if (!item || zone.recommendedPower <= 10) return;
+  if (!item) return;
+  if (archetypeId) {
+    item.archetypeId = getArchetype(archetypeId).id;
+    item.name = getArchetype(archetypeId).name;
+  }
+  if (zone.recommendedPower <= 10) return;
   item.ilvl = zone.recommendedPower;
   item.rarity = zone.recommendedPower >= 30 ? 'marked' : 'refined';
   session.state.player.level = Math.max(1, Math.round(zone.recommendedPower * 0.6));
 }
 
-function soak(seeds: number, zoneId: string): void {
+function soak(seeds: number, zoneId: string, archetypeId?: string): void {
   const zone = getZone(zoneId);
-  console.log(`\nSOAK — ${seeds} scripted clears of ${zone.name}${zone.bossId ? ` (${getBoss(zone.bossId).name})` : ''}\n`);
+  console.log(
+    `\nSOAK — ${seeds} scripted clears of ${zone.name}${zone.bossId ? ` (${getBoss(zone.bossId).name})` : ''}` +
+      `${archetypeId ? ` with the ${getArchetype(archetypeId).name}` : ''}\n`,
+  );
   const runs: SoakRun[] = [];
   for (let i = 0; i < seeds; i++) {
     const seed = 1000 + i * 7919;
     const session = newSession(seed, T0);
     for (const z of Object.keys(session.state.zones)) session.state.zones[z]!.discovered = true;
-    equipFor(session, zoneId);
+    equipFor(session, zoneId, archetypeId);
     landInZone(session, zoneId);
     let t = 0;
     let bossStart = -1;
@@ -197,7 +205,7 @@ function balance(): void {
 
   console.log('\nWEAPON ARCHETYPES (common, ilvl 1, no affixes)\n');
   console.log(
-    pad('archetype', 13) + pad('type', 12) + pad('behaviour', 11) + padL('dps', 8) + padL('dot', 8) + padL('mag', 6) + padL('rpm', 7) + '  proto',
+    pad('archetype', 13) + pad('type', 11) + pad('behaviour', 11) + pad('verb', 10) + padL('dps', 8) + padL('dot', 7) + padL('mag', 6) + padL('rpm', 7),
   );
   for (const a of WEAPON_ARCHETYPES) {
     const r = resolveWeapon(
@@ -209,16 +217,31 @@ function balance(): void {
     const dot = a.status && STATUS_DEFS[a.status.kind].dot ? a.status.magnitude * STATUS_DEFS[a.status.kind].maxStacks : 0;
     console.log(
       pad(a.name, 13) +
-        pad(a.damageType, 12) +
+        pad(a.damageType, 11) +
         pad(a.behavior, 11) +
+        pad(archetypeVerb(a), 10) +
         padL(r.dps.toFixed(0), 8) +
-        padL(dot > 0 ? dot.toFixed(0) : '—', 8) +
+        padL(dot > 0 ? dot.toFixed(0) : '—', 7) +
         padL(r.magazine, 6) +
-        padL(((60 * TICK_HZ) / r.fireInterval).toFixed(0), 7) +
-        (a.prototype ? '  yes' : '  —'),
+        padL(((60 * TICK_HZ) / r.fireInterval).toFixed(0), 7),
     );
   }
   console.log('\n(dot = damage per second at maximum stacks, on top of dps)');
+
+  // The brief's bar is "genuinely different feel, not stat reskins". Two guns
+  // sharing a verb are a reskin however different their numbers are, so the
+  // dump says so out loud rather than leaving it to be noticed.
+  const verbs = new Map<string, string[]>();
+  for (const a of WEAPON_ARCHETYPES) {
+    const v = archetypeVerb(a);
+    verbs.set(v, [...(verbs.get(v) ?? []), a.name]);
+  }
+  const shared = [...verbs].filter(([, names]) => names.length > 1);
+  console.log(
+    shared.length === 0
+      ? `${verbs.size} distinct verbs across ${WEAPON_ARCHETYPES.length} archetypes — no reskins`
+      : `SHARED VERBS: ${shared.map(([v, n]) => `${v} (${n.join(', ')})`).join('; ')}`,
+  );
 
   console.log('\nHOSTILES — effective HP and time to kill with the starting Adze\n');
   const weapon = d.weapon!;
@@ -283,7 +306,7 @@ function bench(): void {
 
 switch (command) {
   case 'soak':
-    soak(Number(flag('seeds', '8')), flag('zone', 'ochre-shelf'));
+    soak(Number(flag('seeds', '8')), flag('zone', 'ochre-shelf'), flag('weapon', '') || undefined);
     break;
   case 'route':
     route(Number(flag('hours', '8')));
@@ -301,7 +324,7 @@ switch (command) {
     console.log(`
 cenotaph headless runner
 
-  soak    [--seeds N] [--zone ID]
+  soak    [--seeds N] [--zone ID] [--weapon ID]
                            scripted zone clears; reports clear rate and pacing
   route   [--hours H]      idle route yields over a period
   parity  [--hours a,b,c]  stepwise vs closed-form offline, hash compared

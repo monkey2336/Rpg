@@ -199,6 +199,12 @@ h2 {
 .weapon .ammo { font-size: 30px; font-weight: 200; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; }
 .weapon .reload { width: 130px; height: 2px; background: var(--panel-edge); }
 .weapon .reload > i { display: block; height: 100%; background: var(--accent); }
+/* Charge weapons only. Hidden entirely for everything else, rather than shown
+   empty — a meter that never moves is noise. */
+.weapon .charge { display: none; width: 130px; height: 4px; background: var(--panel-edge); }
+.weapon .charge.on { display: block; }
+.weapon .charge > i { display: block; height: 100%; width: 0; background: var(--shield); }
+.weapon .charge.full > i { background: var(--ink); }
 .slots { display: flex; gap: 5px; }
 .slots .slot { font-size: 9px; letter-spacing: 0.14em; padding: 3px 8px; border: 1px solid var(--panel-edge); color: var(--dust); }
 .slots .slot.on { border-color: var(--accent); color: var(--accent); }

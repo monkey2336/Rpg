@@ -99,8 +99,11 @@ export const WEAPON_ARCHETYPES: readonly WeaponArchetype[] = [
     hitstop: 2,
     handling: 1.05,
     status: { kind: 'disrupt', chance: 0.3, magnitude: 1, durationTicks: 80 },
+    // Its verb is *spread*. Arc already shreds shields; chaining makes it the
+    // answer to a crowd of shielded things rather than one shielded thing.
+    chain: { jumps: 2, range: 190, falloff: 0.55 },
     prototype: false,
-    flavor: 'Coil-fed. Strips shielding in seconds and leaves it unable to knit back.',
+    flavor: 'Coil-fed. Strips shielding in seconds, and what it strips it strips off the neighbours too.',
   },
   {
     id: 'maw',
@@ -122,6 +125,9 @@ export const WEAPON_ARCHETYPES: readonly WeaponArchetype[] = [
     hitstop: 7,
     handling: 1.0,
     status: { kind: 'stagger', chance: 0.5, magnitude: 1, durationTicks: 18 },
+    // Its verb is *distance*. Without falloff a scattergun is a rifle that
+    // stops working at a fixed line; with it, every step forward is damage.
+    falloff: { start: 55, end: 210, min: 0.22 },
     prototype: false,
     flavor: 'Short, wide, and final. Nine pellets is a suggestion at range and a verdict up close.',
   },
@@ -144,6 +150,10 @@ export const WEAPON_ARCHETYPES: readonly WeaponArchetype[] = [
     recoil: 11,
     hitstop: 9,
     handling: 0.72,
+    // Its verb is *commitment*. You hold the trigger, you cannot dodge well
+    // while you do, and a full charge goes through the queue behind the target.
+    charge: { ticks: 34, minMult: 0.45, maxMult: 2.3, pierceAtFull: 3 },
+    pierce: 1,
     prototype: false,
     flavor: 'Charge, hold, exhale. Pierces every body between you and the horizon.',
   },
@@ -167,6 +177,9 @@ export const WEAPON_ARCHETYPES: readonly WeaponArchetype[] = [
     hitstop: 2,
     handling: 0.88,
     status: { kind: 'ignite', chance: 0.35, magnitude: 7, durationTicks: 100 },
+    // Its verb is *not aiming*. Five slow munitions that steer, so it is the
+    // gun you fire while doing something else — reloading, running, channelling.
+    homing: { strength: 0.16, range: 420 },
     prototype: false,
     flavor: 'Releases a votive swarm that finds its own way to the heat.',
   },
@@ -190,6 +203,11 @@ export const WEAPON_ARCHETYPES: readonly WeaponArchetype[] = [
     hitstop: 1,
     handling: 0.93,
     status: { kind: 'ignite', chance: 0.18, magnitude: 8, durationTicks: 140 },
+    // Its verb is *ground denial*. Falloff alone made it a second scattergun —
+    // the balance dump's verb check caught that — so what it actually does is
+    // leave the floor on fire behind it.
+    falloff: { start: 40, end: 150, min: 0.12 },
+    lingers: { radius: 42, dps: 26, durationTicks: 150 },
     prototype: false,
     flavor: 'Close-range gout. Fills a corridor with standing fire and regret.',
   },
@@ -204,3 +222,20 @@ export function getArchetype(id: string): WeaponArchetype {
 }
 
 export const PROTOTYPE_ARCHETYPES = WEAPON_ARCHETYPES.filter((w) => w.prototype);
+
+/**
+ * The verb each archetype owns, for the UI and for the balance dump.
+ *
+ * If two archetypes would return the same string, one of them is a reskin.
+ */
+export function archetypeVerb(w: WeaponArchetype): string {
+  if (w.lingers) return 'linger';
+  if (w.charge) return 'charge';
+  if (w.homing) return 'homing';
+  if (w.chain) return 'chain';
+  if (w.behavior === 'beam') return 'ramp';
+  if (w.behavior === 'lob') return 'lob';
+  if (w.falloff) return 'falloff';
+  if (w.status?.kind === 'stagger') return 'stagger';
+  return 'baseline';
+}

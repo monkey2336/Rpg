@@ -46,6 +46,7 @@ export class Scene3D {
   private telegraphs = new Map<number, THREE.Mesh>();
   private telegraphPool: THREE.Mesh[] = [];
   private projectiles: THREE.Mesh[] = [];
+  private hazardMeshes: THREE.Mesh[] = [];
   private depositMeshes: THREE.Object3D[] = [];
   private scanMeshes: THREE.Object3D[] = [];
   private beam: THREE.Mesh;
@@ -427,6 +428,7 @@ export class Scene3D {
     this.syncActors(snap, timeMs);
     this.syncTelegraphs(snap);
     this.syncProjectiles(snap);
+    this.syncHazards(snap);
     this.syncPickups(snap);
     this.syncBeam(snap, player);
 
@@ -592,6 +594,39 @@ export class Scene3D {
     }
   }
 
+  /** Burning ground: an additive decal that shrinks as the patch burns out. */
+  private syncHazards(snap: ArenaSnapshot): void {
+    while (this.hazardMeshes.length < snap.hazards.length) {
+      const m = new THREE.Mesh(
+        new THREE.CircleGeometry(1, 24),
+        new THREE.MeshBasicMaterial({
+          color: 0xff8a3a,
+          transparent: true,
+          opacity: 0.3,
+          blending: THREE.AdditiveBlending,
+          depthWrite: false,
+          fog: false,
+        }),
+      );
+      m.rotation.x = -Math.PI / 2;
+      this.scene.add(m);
+      this.hazardMeshes.push(m);
+    }
+    for (let i = 0; i < this.hazardMeshes.length; i++) {
+      const m = this.hazardMeshes[i]!;
+      const h = snap.hazards[i];
+      if (!h) {
+        m.visible = false;
+        continue;
+      }
+      m.visible = true;
+      m.position.set(h.x, 1.6, h.z);
+      m.scale.setScalar(h.radius * (0.6 + h.life * 0.4));
+      (m.material as THREE.MeshBasicMaterial).color.setHex(DAMAGE_COLOR[h.type] ?? 0xff8a3a);
+      (m.material as THREE.MeshBasicMaterial).opacity = 0.12 + h.life * 0.26;
+    }
+  }
+
   private syncPickups(snap: ArenaSnapshot): void {
     for (let i = 0; i < this.depositMeshes.length; i++) {
       const d = snap.deposits[i];
@@ -725,6 +760,13 @@ export class Scene3D {
         case 'weak':
           this.fx.impact(ev.x, ev.y, ev.z, ev.damageType, true, true);
           this.fx.number(ev.x, ev.y, ev.z, String(Math.round(ev.amount)), '#ff9a3c', 1.6);
+          break;
+        case 'chain':
+          // The arc is drawn between the two bodies it jumped, so a chain is
+          // something the player sees happen rather than a damage number that
+          // appears somewhere they were not looking.
+          this.fx.tracer(ev.x, ev.y, ev.z, ev.x, ev.y, ev.z, 'arc', 7);
+          this.fx.impact(ev.x, ev.y, ev.z, 'arc', false, false);
           break;
         case 'warded':
           // Deflection, not damage: a cold spark and no number, so the player

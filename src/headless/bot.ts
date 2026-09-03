@@ -40,6 +40,10 @@ export function botInput(session: Session, tick: number, opts: BotOptions = {}):
   input.dodge = imminent || tick % 140 === 0;
 
   const hostile = nearestHostile(a, p.x, p.z);
+  // A charge weapon fires on release, so holding the trigger forever means
+  // never firing at all. The policy charges to full and lets go.
+  const charging = a.player.chargeMax > 0;
+  const wantsToFire = !charging || a.player.charge < a.player.chargeMax;
 
   // --- objective: satisfy the gate before touching the boss ----------------
   const needDeposits = a.minedCount < zone.gate.deposits;
@@ -62,7 +66,7 @@ export function botInput(session: Session, tick: number, opts: BotOptions = {}):
     // Channelling does not stop you shooting; it only stops you moving.
     if (hostile) {
       aimAt(input, p, hostile);
-      input.fire = horizDist(hostile.x, hostile.z, p.x, p.z) < 700;
+      input.fire = wantsToFire && horizDist(hostile.x, hostile.z, p.x, p.z) < 700;
     }
     return input;
   }
@@ -72,10 +76,14 @@ export function botInput(session: Session, tick: number, opts: BotOptions = {}):
 
   if (hostile) {
     aimAt(input, p, hostile);
-    input.fire = true;
+    input.fire = wantsToFire;
 
     const gap = horizDist(hostile.x, hostile.z, p.x, p.z);
-    const want = hostile.kind === 'boss' ? 300 : 170;
+    // Falloff weapons have to be flown differently: a scattergun held at rifle
+    // range is doing a fifth of its damage, and a policy that does not close is
+    // measuring the wrong thing.
+    const shortRanged = a.player.effectiveRange > 0 && a.player.effectiveRange < 260;
+    const want = shortRanged ? 90 : hostile.kind === 'boss' ? 300 : 170;
     const bearing = atan2(hostile.z - p.z, hostile.x - p.x);
     input.camYaw = bearing;
     if (gap > want + 60) input.moveZ = 1;

@@ -69,6 +69,7 @@ export type ArenaEventType =
   | 'phase'
   | 'vent'
   | 'warded'
+  | 'chain'
   | 'boss-ready'
   | 'boss-down'
   | 'mined'
@@ -124,6 +125,20 @@ export interface PlayerRuntime {
   aimPitch: number;
   /** Accumulated recoil, in radians of pitch. Presentation reads it too. */
   recoil: number;
+  /** Ticks of charge held, for charge weapons. 0 for everything else. */
+  charge: number;
+  /** The charge ceiling for the equipped weapon; 0 if it does not charge. */
+  chargeMax: number;
+  /**
+   * The distance at which the equipped weapon still does most of its damage.
+   *
+   * Falloff makes "range" a lie: a scattergun reaches 190 units and is doing a
+   * fifth of its damage at 150. Anything deciding how to space a fight — the
+   * HUD, the reference policy — needs the useful number, not the maximum one.
+   */
+  effectiveRange: number;
+  /** Last tick's fire input, so a charge weapon can fire on release. */
+  wasFiring: boolean;
 }
 
 export interface ArenaState {
@@ -133,6 +148,7 @@ export interface ArenaState {
   entities: Entity[];
   projectiles: import('./types.js').Projectile[];
   telegraphs: Telegraph[];
+  hazards: import('./types.js').Hazard[];
   deposits: Deposit[];
   scans: ScanSite[];
   player: PlayerRuntime;
@@ -285,6 +301,7 @@ export function createArena(zoneId: string, seed: number, playerDefences: Defenc
     entities: [],
     projectiles: [],
     telegraphs: [],
+    hazards: [],
     deposits: [],
     scans: [],
     player: {
@@ -301,6 +318,10 @@ export function createArena(zoneId: string, seed: number, playerDefences: Defenc
       aimYaw: 0,
       aimPitch: 0,
       recoil: 0,
+      charge: 0,
+      chargeMax: 0,
+      effectiveRange: 0,
+      wasFiring: false,
     },
     nextId: 1,
     waveTimer: 90,
@@ -558,6 +579,28 @@ export interface HitResult {
 
 const NO_HIT: HitResult = { dealt: 0, weak: false, killed: false };
 
+/**
+ * The one place something dies.
+ *
+ * There are three ways to kill a hostile — a shot, a damage-over-time tick, and
+ * standing in fire — and until this existed each one had its own copy of the
+ * bookkeeping. They had already drifted: the status path forgot to grant kill
+ * recovery, and the hazard path reported a dead boss as an ordinary kill, which
+ * crashed the moment a flamethrower finished the Kiln Warden.
+ */
+function killEntity(a: ArenaState, e: Entity): void {
+  if (e.dead) return;
+  e.dead = true;
+  const isBoss = e.kind === 'boss';
+  if (!isBoss) a.kills += 1;
+  grantKillRecovery(a);
+  emit(a, { type: isBoss ? 'boss-down' : 'kill', x: e.x, y: e.y, z: e.z, id: e.id, text: e.defId });
+  if (isBoss) {
+    a.outcome = 'cleared';
+    a.shake = 30;
+  }
+}
+
 function damageEntity(
   a: ArenaState,
   e: Entity,
@@ -595,15 +638,7 @@ function damageEntity(
   }
 
   if (res.killed) {
-    e.dead = true;
-    a.kills += 1;
-    grantKillRecovery(a);
-    const isBoss = e.kind === 'boss';
-    emit(a, { type: isBoss ? 'boss-down' : 'kill', x: e.x, y: e.y, z: e.z, id: e.id, text: e.defId });
-    if (isBoss) {
-      a.outcome = 'cleared';
-      a.shake = 30;
-    }
+    killEntity(a, e);
   } else if (e.kind === 'boss') {
     const def = getBoss(e.defId);
     const frac = e.def.health / e.def.healthMax;
@@ -686,7 +721,26 @@ interface TraceHit {
  * weak points are effectively unhittable and the whole knowledge-reward layer
  * of the boss design is decorative.
  */
-function traceHitscan(
+/**
+ * Distance falloff. Full damage out to `start`, decaying linearly to `min` by
+ * `end`. This is what makes a scattergun a scattergun: without it, range is a
+ * hard cutoff and the weapon reads as a rifle that stops working.
+ */
+function falloffAt(f: { start: number; end: number; min: number } | undefined, distance: number): number {
+  if (!f || distance <= f.start) return 1;
+  if (distance >= f.end) return f.min;
+  const t = (distance - f.start) / Math.max(1, f.end - f.start);
+  return 1 + (f.min - 1) * t;
+}
+
+/**
+ * Collects up to `maxTargets` distinct bodies along the ray, nearest first.
+ *
+ * One target is the ordinary case; more is what a rail's pierce buys. The
+ * weak-point preference below applies to each body independently, so a piercing
+ * shot can crit a weak point on the second target it passes through.
+ */
+function traceHitscanAll(
   a: ArenaState,
   ox: number,
   oy: number,
@@ -694,37 +748,55 @@ function traceHitscan(
   yaw: number,
   pitch: number,
   range: number,
-): TraceHit | null {
+  maxTargets: number,
+): TraceHit[] {
+  const hits: TraceHit[] = [];
+  const seen = new Set<number>();
   const cp = cos(pitch);
   const dx = cp * cos(yaw);
   const dy = sin(pitch);
   const dz = cp * sin(yaw);
   const step = 4;
-  let body: TraceHit | null = null;
-  let bodyT = 0;
+  let inside: { e: Entity; enteredAt: number; best: TraceHit | null } | null = null;
 
-  for (let t = 6; t <= range; t += step) {
+  const commit = () => {
+    if (!inside) return;
+    hits.push(inside.best ?? { e: inside.e, x: ox + dx * inside.enteredAt, y: oy + dy * inside.enteredAt, z: oz + dz * inside.enteredAt });
+    seen.add(inside.e.id);
+    inside = null;
+  };
+
+  for (let t = 6; t <= range && hits.length < maxTargets; t += step) {
     const x = ox + dx * t;
     const y = oy + dy * t;
     const z = oz + dz * t;
     if (y < 0) break;
 
-    if (body) {
-      if (hitWeakPoint(body.e, x, y, z)) return { e: body.e, x, y, z };
-      if (t > bodyT + body.e.radius * 2 + body.e.height) break;
+    if (inside) {
+      const wp = hitWeakPoint(inside.e, x, y, z);
+      if (wp) {
+        inside.best = { e: inside.e, x, y, z };
+        commit();
+        continue;
+      }
+      if (t > inside.enteredAt + inside.e.radius * 2 + inside.e.height) commit();
       continue;
     }
     for (const e of a.entities) {
-      if (e.faction !== 'hostile' || e.dead) continue;
-      if (hitWeakPoint(e, x, y, z)) return { e, x, y, z };
+      if (e.faction !== 'hostile' || e.dead || seen.has(e.id)) continue;
+      if (hitWeakPoint(e, x, y, z)) {
+        hits.push({ e, x, y, z });
+        seen.add(e.id);
+        break;
+      }
       if (inBody(e, x, y, z)) {
-        body = { e, x, y, z };
-        bodyT = t;
+        inside = { e, enteredAt: t, best: null };
         break;
       }
     }
   }
-  return body;
+  commit();
+  return hits.slice(0, maxTargets);
 }
 
 type StatusApplication = { kind: StatusKind; chance: number; magnitude: number; durationTicks: number };
@@ -742,6 +814,49 @@ function statusFor(w: ResolvedWeapon): StatusApplication | null {
   return ARCH_STATUS[w.archetypeId] ?? null;
 }
 
+/**
+ * Arcs from a connect to nearby hostiles, for reduced damage each jump.
+ *
+ * Emits its own hit events so the tracer and the sound follow the arc — a chain
+ * the player cannot see is a damage buff, not a mechanic.
+ */
+function chainFrom(
+  a: ArenaState,
+  origin: Entity,
+  x: number,
+  y: number,
+  z: number,
+  damage: number,
+  type: DamageType,
+  chain: { jumps: number; range: number; falloff: number },
+): void {
+  let fromX = x;
+  let fromZ = z;
+  const struck = new Set<number>([origin.id]);
+  let power = damage;
+
+  for (let j = 0; j < chain.jumps; j++) {
+    let target: Entity | null = null;
+    let bestD = chain.range;
+    for (const e of a.entities) {
+      if (e.faction !== 'hostile' || e.dead || struck.has(e.id) || e.iframes > 0) continue;
+      const d = horizDist(e.x, e.z, fromX, fromZ);
+      if (d < bestD) {
+        bestD = d;
+        target = e;
+      }
+    }
+    if (!target) return;
+    power *= chain.falloff;
+    struck.add(target.id);
+    const ty = target.y + target.height * 0.5;
+    emit(a, { type: 'chain', x: fromX, y, z: fromZ, amount: bestD, text: String(target.id), damageType: type, id: target.id });
+    damageEntity(a, target, power, type, target.x, ty, target.z, false, 1);
+    fromX = target.x;
+    fromZ = target.z;
+  }
+}
+
 function maybeStatus(a: ArenaState, e: Entity, w: ResolvedWeapon, statusMult: number): void {
   const status = statusFor(w);
   if (!status) return;
@@ -750,7 +865,13 @@ function maybeStatus(a: ArenaState, e: Entity, w: ResolvedWeapon, statusMult: nu
   }
 }
 
-function fireWeapon(a: ArenaState, w: ResolvedWeapon, statusMult: number): void {
+/**
+ * Fires one shot.
+ *
+ * `chargeMult` is 1 for everything except a rail, which pays for its damage by
+ * making you commit to holding the trigger.
+ */
+function fireWeapon(a: ArenaState, w: ResolvedWeapon, statusMult: number, chargeMult = 1, extraPierce = 0): void {
   const p = playerEntity(a);
   const pr = a.player;
   const ox = p.x;
@@ -761,27 +882,38 @@ function fireWeapon(a: ArenaState, w: ResolvedWeapon, statusMult: number): void 
     x: ox,
     y: oy,
     z: oz,
-    amount: w.recoil,
+    amount: w.recoil * chargeMult,
     text: w.archetypeId,
     damageType: w.damageType,
     id: p.id,
   });
 
+  const pierce = (w.pierce ?? 0) + extraPierce;
+
   for (let i = 0; i < w.pellets; i++) {
     const yaw = pr.aimYaw + nextRange(a.rng, -w.spread, w.spread);
     const pitch = pr.aimPitch + nextRange(a.rng, -w.spread, w.spread);
     const crit = chance(a.rng, w.critChance);
+
     if (w.behavior === 'hitscan' || w.behavior === 'beam') {
       const ramp = w.behavior === 'beam' ? 1 + pr.beamRamp * 0.9 : 1;
-      const hit = traceHitscan(a, ox, oy, oz, yaw, pitch, w.range);
-      if (hit) {
-        const res = damageEntity(a, hit.e, w.damage * ramp, w.damageType, hit.x, hit.y, hit.z, crit, w.critMult);
-        registerHit(a, w, res, crit);
+      const hits = traceHitscanAll(a, ox, oy, oz, yaw, pitch, w.range, 1 + pierce);
+      for (let h = 0; h < hits.length; h++) {
+        const hit = hits[h]!;
+        const travelled = Math.sqrt(
+          (hit.x - ox) * (hit.x - ox) + (hit.y - oy) * (hit.y - oy) + (hit.z - oz) * (hit.z - oz),
+        );
+        // Each body past the first costs the shot something, so pierce is a
+        // reward for lining targets up rather than a flat multiplier.
+        const pierceDecay = Math.pow(0.82, h);
+        const dmg = w.damage * ramp * chargeMult * falloffAt(w.falloff, travelled) * pierceDecay;
+        const res = damageEntity(a, hit.e, dmg, w.damageType, hit.x, hit.y, hit.z, crit, w.critMult);
+        if (h === 0) registerHit(a, w, res, crit);
         maybeStatus(a, hit.e, w, statusMult);
+        if (w.chain) chainFrom(a, hit.e, hit.x, hit.y, hit.z, dmg * w.chain.falloff, w.damageType, w.chain);
         if (w.behavior === 'beam') pr.beamRamp = Math.min(1, pr.beamRamp + 0.012);
-      } else if (w.behavior === 'beam') {
-        pr.beamRamp = Math.max(0, pr.beamRamp - 0.03);
       }
+      if (hits.length === 0 && w.behavior === 'beam') pr.beamRamp = Math.max(0, pr.beamRamp - 0.03);
     } else {
       const speed = w.projectileSpeed;
       // A lob is aimed above the line of sight so the arc lands where you look.
@@ -797,17 +929,67 @@ function fireWeapon(a: ArenaState, w: ResolvedWeapon, statusMult: number): void 
         vx: cp * cos(yaw) * speed,
         vy: sin(p2) * speed,
         vz: cp * sin(yaw) * speed,
-        damage: w.damage,
+        damage: w.damage * chargeMult,
         damageType: w.damageType,
         radius: 6,
         ticksLeft: Math.round(w.range / Math.max(1, speed)) + 20,
         gravity: w.behavior === 'lob' ? 0.24 : 0,
-        pierce: 0,
+        pierce,
+        travelled: 0,
+        ...(w.lingers ? { lingers: w.lingers } : {}),
+        ...(w.homing ? { homing: w.homing } : {}),
+        ...(w.falloff ? { falloff: w.falloff } : {}),
+        ...(w.chain ? { chain: w.chain } : {}),
         crit,
       });
     }
   }
-  pr.recoil = Math.min(0.16, pr.recoil + w.recoil * 0.004);
+  pr.recoil = Math.min(0.16, pr.recoil + w.recoil * 0.004 * chargeMult);
+}
+
+/**
+ * The trigger, including the charge weapons' hold-and-release.
+ *
+ * Kept apart from `fireWeapon` because "when does a shot happen" and "what does
+ * a shot do" are different questions, and a rail only differs in the first.
+ */
+function stepTrigger(a: ArenaState, w: ResolvedWeapon, firing: boolean): void {
+  const pr = a.player;
+  const p = playerEntity(a);
+  const ready = pr.fireCooldown <= 0 && pr.ammo > 0 && pr.reloadLeft <= 0 && p.stunned <= 0;
+  pr.chargeMax = w.charge?.ticks ?? 0;
+  // Where the weapon still does at least 60% of its damage.
+  pr.effectiveRange = w.falloff
+    ? w.falloff.start + (w.falloff.end - w.falloff.start) * Math.max(0, (1 - 0.6) / (1 - w.falloff.min))
+    : w.range;
+
+  if (w.charge) {
+    // Hold to charge, release to fire. Holding at full is a real choice: it
+    // costs you mobility and reaction time, and the shot is worth it.
+    if (firing && ready) {
+      pr.charge = Math.min(w.charge.ticks, pr.charge + 1);
+    } else if (!firing && pr.wasFiring && pr.charge > 0 && ready) {
+      const t = pr.charge / w.charge.ticks;
+      const mult = w.charge.minMult + (w.charge.maxMult - w.charge.minMult) * t;
+      const extraPierce = t >= 0.999 ? w.charge.pierceAtFull : 0;
+      fireWeapon(a, w, w.statusChanceMult, mult, extraPierce);
+      pr.ammo -= 1;
+      pr.fireCooldown = w.fireInterval;
+      pr.charge = 0;
+    } else if (!firing) {
+      pr.charge = 0;
+    }
+    pr.wasFiring = firing;
+    return;
+  }
+
+  pr.charge = 0;
+  pr.wasFiring = firing;
+  if (firing && ready) {
+    fireWeapon(a, w, w.statusChanceMult);
+    pr.ammo -= 1;
+    pr.fireCooldown = w.fireInterval;
+  }
 }
 
 /* ---------------------------------- AI ------------------------------------ */
@@ -942,6 +1124,7 @@ function shootAtPlayer(a: ArenaState, e: Entity, p: Entity, def: EnemyDef, speed
     ticksLeft: 140,
     gravity: 0,
     pierce: 0,
+    travelled: 0,
     crit: false,
   });
 }
@@ -972,6 +1155,7 @@ function lobAtPlayer(a: ArenaState, e: Entity, p: Entity, def: EnemyDef): void {
     ticksLeft: 220,
     gravity: 0.26,
     pierce: 0,
+    travelled: 0,
     crit: false,
   });
 }
@@ -1253,11 +1437,7 @@ export function stepArena(a: ArenaState, input: InputFrame, ctx: StepContext): A
       if (pr.reloadLeft === 0) pr.ammo = w.magazine;
     }
     if (pr.fireCooldown > 0) pr.fireCooldown -= 1;
-    if (input.fire && pr.fireCooldown <= 0 && pr.ammo > 0 && pr.reloadLeft <= 0 && p.stunned <= 0) {
-      fireWeapon(a, w, w.statusChanceMult);
-      pr.ammo -= 1;
-      pr.fireCooldown = w.fireInterval;
-    }
+    stepTrigger(a, w, input.fire);
     if (!input.fire) pr.beamRamp = Math.max(0, pr.beamRamp - 0.02);
   }
 
@@ -1308,11 +1488,8 @@ export function stepArena(a: ArenaState, input: InputFrame, ctx: StepContext): A
     if (e.stunned > 0 && e.kind !== 'player') e.stunned -= 1;
 
     const st = tickStatuses(e.statuses, e.def);
-    if (st.damage > 0 && e.def.health <= 0 && !e.dead) {
-      e.dead = true;
-      if (e.kind === 'boss') a.outcome = 'cleared';
-      else a.kills += 1;
-      emit(a, { type: e.kind === 'boss' ? 'boss-down' : 'kill', x: e.x, y: e.y, z: e.z, id: e.id, text: e.defId });
+    if (st.damage > 0 && e.def.health <= 0 && !e.dead && e.faction === 'hostile') {
+      killEntity(a, e);
     }
     if (e.kind === 'player' && e.def.health <= 0 && !e.dead) {
       e.dead = true;
@@ -1337,10 +1514,43 @@ export function stepArena(a: ArenaState, input: InputFrame, ctx: StepContext): A
   // --- projectiles ---
   for (let i = a.projectiles.length - 1; i >= 0; i--) {
     const pj = a.projectiles[i]!;
+
+    // Swarm munitions steer. The turn rate is deliberately modest: it should
+    // read as "these find their way" rather than "these cannot be dodged".
+    if (pj.homing && pj.faction === 'player') {
+      let target: Entity | null = null;
+      let bestD = pj.homing.range;
+      for (const e of a.entities) {
+        if (e.faction !== 'hostile' || e.dead) continue;
+        const d = horizDist(e.x, e.z, pj.x, pj.z);
+        if (d < bestD) {
+          bestD = d;
+          target = e;
+        }
+      }
+      if (target) {
+        const speed = Math.sqrt(pj.vx * pj.vx + pj.vy * pj.vy + pj.vz * pj.vz);
+        const tx = target.x - pj.x;
+        const ty = target.y + target.height * 0.5 - pj.y;
+        const tz = target.z - pj.z;
+        const len = Math.sqrt(tx * tx + ty * ty + tz * tz) || 1;
+        const k = pj.homing.strength;
+        pj.vx += (tx / len) * speed * k;
+        pj.vy += (ty / len) * speed * k;
+        pj.vz += (tz / len) * speed * k;
+        // Renormalise, or steering silently doubles as acceleration.
+        const now = Math.sqrt(pj.vx * pj.vx + pj.vy * pj.vy + pj.vz * pj.vz) || 1;
+        pj.vx = (pj.vx / now) * speed;
+        pj.vy = (pj.vy / now) * speed;
+        pj.vz = (pj.vz / now) * speed;
+      }
+    }
+
     pj.vy -= pj.gravity;
     pj.x += pj.vx;
     pj.y += pj.vy;
     pj.z += pj.vz;
+    pj.travelled += Math.sqrt(pj.vx * pj.vx + pj.vy * pj.vy + pj.vz * pj.vz);
     pj.ticksLeft -= 1;
     let consumed = pj.ticksLeft <= 0 || pj.y < 0 || horizDist(0, 0, pj.x, pj.z) > ARENA_RADIUS + 80;
     if (!consumed) {
@@ -1348,11 +1558,13 @@ export function stepArena(a: ArenaState, input: InputFrame, ctx: StepContext): A
         for (const e of a.entities) {
           if (e.faction !== 'hostile' || e.dead) continue;
           if (inBody(e, pj.x, pj.y, pj.z)) {
-            const res = damageEntity(a, e, pj.damage, pj.damageType, pj.x, pj.y, pj.z, pj.crit, 2);
+            const dmg = pj.damage * falloffAt(pj.falloff, pj.travelled);
+            const res = damageEntity(a, e, dmg, pj.damageType, pj.x, pj.y, pj.z, pj.crit, 2);
             if (ctx.weapon) {
               registerHit(a, ctx.weapon, res, pj.crit);
               maybeStatus(a, e, ctx.weapon, ctx.weapon.statusChanceMult);
             }
+            if (pj.chain) chainFrom(a, e, pj.x, pj.y, pj.z, dmg * pj.chain.falloff, pj.damageType, pj.chain);
             consumed = pj.pierce <= 0;
             pj.pierce -= 1;
             break;
@@ -1363,7 +1575,61 @@ export function stepArena(a: ArenaState, input: InputFrame, ctx: StepContext): A
         consumed = true;
       }
     }
-    if (consumed) a.projectiles.splice(i, 1);
+    if (consumed) {
+      // Lingering munitions leave their patch wherever they stop, whether that
+      // was a body or the floor.
+      if (pj.lingers && pj.faction === 'player') {
+        // Patches MERGE. A flamethrower firing twenty-six rounds a second lays
+        // twenty-six overlapping patches, and if they stack the weapon does a
+        // thousand damage a second through an effect the player cannot see.
+        // Overlapping fire refreshes and grows the existing patch instead —
+        // which is also what setting the floor on fire actually looks like.
+        const near = a.hazards.find(
+          (h) => h.faction === 'player' && horizDist(h.x, h.z, pj.x, pj.z) < h.radius * 0.75,
+        );
+        if (near) {
+          near.ticksLeft = Math.max(near.ticksLeft, pj.lingers.durationTicks);
+          near.radius = Math.min(pj.lingers.radius * 1.6, near.radius + 1.2);
+          // Drift toward the new impact, so sweeping the stream moves the fire.
+          near.x += (pj.x - near.x) * 0.12;
+          near.z += (pj.z - near.z) * 0.12;
+        } else if (a.hazards.length < 14) {
+          a.hazards.push({
+            id: a.nextId++,
+            x: pj.x,
+            z: pj.z,
+            radius: pj.lingers.radius,
+            dps: pj.lingers.dps,
+            damageType: pj.damageType,
+            ticksLeft: pj.lingers.durationTicks,
+            totalTicks: pj.lingers.durationTicks,
+            faction: 'player',
+          });
+        }
+      }
+      a.projectiles.splice(i, 1);
+    }
+  }
+
+  // --- hazards: ground that keeps hurting whatever stands in it ------------
+  for (let i = a.hazards.length - 1; i >= 0; i--) {
+    const hz = a.hazards[i]!;
+    hz.ticksLeft -= 1;
+    if (hz.ticksLeft <= 0) {
+      a.hazards.splice(i, 1);
+      continue;
+    }
+    const perTick = hz.dps / TICK_HZ;
+    if (hz.faction === 'player') {
+      for (const e of a.entities) {
+        if (e.faction !== 'hostile' || e.dead || e.iframes > 0) continue;
+        if (horizDist(e.x, e.z, hz.x, hz.z) > hz.radius + e.radius) continue;
+        const res = applyDamage(e.def, perTick, hz.damageType, {});
+        if (res.killed) killEntity(a, e);
+      }
+    } else if (horizDist(p.x, p.z, hz.x, hz.z) <= hz.radius + p.radius) {
+      damagePlayer(a, perTick, hz.damageType);
+    }
   }
 
   // --- telegraphs ---

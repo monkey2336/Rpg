@@ -62,7 +62,29 @@ export interface WeaponArchetype {
   /** Movement speed multiplier while wielded. Heavy guns are heavy. */
   handling: number;
   status?: { kind: StatusKind; chance: number; magnitude: number; durationTicks: number };
-  /** Unlocked in the Tier 1 prototype build. */
+
+  /* --- the mechanics that make an archetype an archetype ------------------
+   * The brief's bar is "genuinely different feel, not stat reskins". A gun that
+   * differs only in its numbers is a reskin however carefully the numbers are
+   * chosen, so each of these exists to give one family a verb the others do not
+   * have. All are optional and all are generic: a future archetype composes
+   * them rather than getting its own branch in the arena.
+   */
+
+  /** Hold to charge, release to fire. Damage scales; a full charge pierces. */
+  charge?: { ticks: number; minMult: number; maxMult: number; pierceAtFull: number };
+  /** Projectiles steer toward the nearest hostile. */
+  homing?: { strength: number; range: number };
+  /** On a connect, arc to nearby hostiles for reduced damage. */
+  chain?: { jumps: number; range: number; falloff: number };
+  /** Damage decays with distance: full to `start`, down to `min` by `end`. */
+  falloff?: { start: number; end: number; min: number };
+  /** Shots pass through this many bodies beyond the first. */
+  pierce?: number;
+  /** Leaves a burning patch where it lands. */
+  lingers?: { radius: number; dps: number; durationTicks: number };
+
+  /** Included in the starting kit. Everything else is found. */
   prototype: boolean;
   flavor: string;
 }
@@ -195,8 +217,34 @@ export interface Projectile {
   /** Lobbed projectiles arc; hitscan traces resolve instantly and never appear here. */
   gravity: number;
   pierce: number;
+  /** Steering toward the nearest hostile, for swarm munitions. */
+  homing?: { strength: number; range: number };
+  /** Distance travelled so far, for falloff. */
+  travelled: number;
+  falloff?: { start: number; end: number; min: number };
+  chain?: { jumps: number; range: number; falloff: number };
+  lingers?: { radius: number; dps: number; durationTicks: number };
   status?: { kind: StatusKind; chance: number; magnitude: number; durationTicks: number };
   crit: boolean;
+}
+
+/**
+ * A patch of ground that keeps hurting whatever stands in it.
+ *
+ * Generic on purpose: it is a flamethrower's identity today and it is what a
+ * future boss's caustic pool will be built from.
+ */
+export interface Hazard {
+  id: number;
+  x: number;
+  z: number;
+  radius: number;
+  dps: number;
+  damageType: DamageType;
+  ticksLeft: number;
+  totalTicks: number;
+  /** Who laid it. A player hazard hurts hostiles and vice versa. */
+  faction: Faction;
 }
 
 export interface DamageEvent {

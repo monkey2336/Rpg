@@ -7,7 +7,7 @@
  */
 import type { GameState } from './state.js';
 import { findItem } from './state.js';
-import type { DamageType, Defences, WeaponBehavior, WeaponInstance } from './types.js';
+import type { DamageType, Defences, WeaponArchetype, WeaponBehavior, WeaponInstance } from './types.js';
 import { getArchetype } from './content/weapons.js';
 import { RARITY_DEFS } from './content/items.js';
 import { getTech } from './content/tech.js';
@@ -35,6 +35,14 @@ export interface ResolvedWeapon {
   hitstop: number;
   handling: number;
   statusChanceMult: number;
+  /** The archetype's mechanics, passed through untouched — affixes scale
+   *  numbers, they never change what verb a gun has. */
+  charge?: WeaponArchetype['charge'];
+  homing?: WeaponArchetype['homing'];
+  chain?: WeaponArchetype['chain'];
+  falloff?: WeaponArchetype['falloff'];
+  pierce?: number;
+  lingers?: WeaponArchetype['lingers'];
   dps: number;
 }
 
@@ -143,11 +151,14 @@ export function resolveWeapon(item: WeaponInstance, damageMult: number): Resolve
     }
   }
 
-  // Sustained DPS including the reload, which is the number that should drive
-  // idle route maths — burst DPS would systematically overpay the idle loop.
+  // Sustained DPS including the reload — and the charge, for weapons that have
+  // one. This is the number that drives idle route maths, so a rail that takes
+  // a second to wind up must not be priced as if it fires instantly.
   const shotsPerMag = Math.max(1, magazine);
-  const cycleTicks = shotsPerMag * fireInterval + reloadTicks;
-  const perShot = damage * a.pellets * (1 + critChance * (critMult - 1));
+  const chargeTicks = a.charge ? a.charge.ticks : 0;
+  const chargeMult = a.charge ? (a.charge.minMult + a.charge.maxMult) / 2 : 1;
+  const cycleTicks = shotsPerMag * (fireInterval + chargeTicks) + reloadTicks;
+  const perShot = damage * chargeMult * a.pellets * (1 + critChance * (critMult - 1));
   const dps = (perShot * shotsPerMag * TICK_HZ) / cycleTicks;
 
   return {
@@ -170,6 +181,12 @@ export function resolveWeapon(item: WeaponInstance, damageMult: number): Resolve
     hitstop: a.hitstop,
     handling,
     statusChanceMult,
+    ...(a.charge ? { charge: a.charge } : {}),
+    ...(a.homing ? { homing: a.homing } : {}),
+    ...(a.chain ? { chain: a.chain } : {}),
+    ...(a.falloff ? { falloff: a.falloff } : {}),
+    ...(a.pierce ? { pierce: a.pierce } : {}),
+    ...(a.lingers ? { lingers: a.lingers } : {}),
     dps,
   };
 }

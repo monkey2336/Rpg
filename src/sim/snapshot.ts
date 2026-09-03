@@ -128,6 +128,8 @@ export interface ArenaSnapshot {
   }[];
   projectiles: { x: number; y: number; z: number; type: string; r: number; hostile: boolean }[];
   telegraphs: { x: number; z: number; r: number; shape: string; type: string; progress: number; yaw: number }[];
+  /** Burning ground. `life` runs 1 to 0 as the patch burns out. */
+  hazards: { x: number; z: number; radius: number; type: string; life: number }[];
   deposits: { x: number; z: number; progress: number; depleted: boolean }[];
   scans: { x: number; z: number; progress: number; done: boolean }[];
   player: {
@@ -138,6 +140,8 @@ export interface ArenaSnapshot {
     aimPitch: number;
     recoil: number;
     beamRamp: number;
+    /** 0 to 1 for charge weapons; 0 for everything else. */
+    charge: number;
     dodging: boolean;
     interacting: boolean;
     firing: boolean;
@@ -351,6 +355,13 @@ function buildArenaSnapshot(a: ArenaState): ArenaSnapshot {
       progress: 1 - t.ticksLeft / Math.max(1, t.totalTicks),
       yaw: t.yaw,
     })),
+    hazards: a.hazards.map((h) => ({
+      x: h.x,
+      z: h.z,
+      radius: h.radius,
+      type: h.damageType,
+      life: h.ticksLeft / Math.max(1, h.totalTicks),
+    })),
     deposits: a.deposits.map((dp) => ({ x: dp.x, z: dp.z, progress: dp.progress / dp.required, depleted: dp.depleted })),
     scans: a.scans.map((s) => ({ x: s.x, z: s.z, progress: s.progress / s.required, done: s.done })),
     player: {
@@ -361,6 +372,7 @@ function buildArenaSnapshot(a: ArenaState): ArenaSnapshot {
       aimPitch: a.player.aimPitch,
       recoil: a.player.recoil,
       beamRamp: a.player.beamRamp,
+      charge: a.player.chargeMax > 0 ? a.player.charge / a.player.chargeMax : 0,
       dodging: a.player.dodgeLeft > 0,
       interacting: a.player.interactTargetId >= 0,
       firing: a.player.fireCooldown > 0,

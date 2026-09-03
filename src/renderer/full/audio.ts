@@ -25,6 +25,7 @@ export type CueName =
   | 'impact-health'
   | 'impact-weak'
   | 'warded'
+  | 'chain'
   | 'kill'
   | 'reload'
   | 'dodge'
@@ -182,6 +183,11 @@ export const CUES: Record<CueName, Cue> = {
   warded: (c, d, t, o) => {
     tone(c, d, t, { type: 'sine', from: 320 * o.vary, to: 190, dur: 0.1, gain: 0.14 * o.gain });
     noise(c, d, t, { dur: 0.07, gain: 0.1 * o.gain, from: 1200, to: 500, q: 3.5 });
+  },
+  // Thinner and higher than a direct hit, so an arc is audibly secondary.
+  chain: (c, d, t, o) => {
+    tone(c, d, t, { type: 'sawtooth', from: 1400 * o.vary, to: 2600, dur: 0.09, gain: 0.09 * o.gain });
+    noise(c, d, t, { dur: 0.06, gain: 0.08 * o.gain, from: 3400, to: 6200, q: 4 });
   },
   kill: (c, d, t, o) => {
     noise(c, d, t, { dur: 0.28, gain: 0.22 * o.gain, from: 900 * o.vary, to: 90, q: 1, type: 'lowpass' });
@@ -461,6 +467,9 @@ export class AudioEngine {
           break;
         case 'warded':
           this.play('warded', { gain: 0.6 });
+          break;
+        case 'chain':
+          this.play('chain', { gain: 0.7 });
           break;
         case 'kill':
           this.play('kill', { gain: 0.7 });

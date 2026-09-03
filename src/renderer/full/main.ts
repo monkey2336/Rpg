@@ -303,6 +303,12 @@ function paintHud(s: FullSnapshot): void {
     $('#w-ammo').textContent = `${s.weapon.ammo} / ${s.weapon.magazine}`;
     $('#w-reload').style.width = `${(s.weapon.reloadProgress * 100).toFixed(0)}%`;
   }
+  const charge = a.player.charge;
+  const chargeBar = $('#w-charge');
+  chargeBar.classList.toggle('on', charge > 0 || (catalog.activeArchetype === 'obelisk'));
+  chargeBar.classList.toggle('full', charge >= 0.999);
+  $('#w-charge-fill').style.width = `${(charge * 100).toFixed(0)}%`;
+
   $('#w-slots').innerHTML = [0, 1, 2]
     .map((i) => `<span class="slot ${i === (catalog.activeSlot ?? 0) ? 'on' : ''}">${i + 1}</span>`)
     .join('');
