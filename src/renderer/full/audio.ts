@@ -14,6 +14,7 @@
  * asserts it is audible and the right length, which is the only way to verify
  * sound in a build nobody can listen to.
  */
+import { buildBed, playToll, soundscapeFor, type Bed, type SoundscapeDef } from './soundscape.js';
 
 export type CueName =
   | 'fire-adze'
@@ -52,7 +53,7 @@ let sharedNoise: AudioBuffer | null = null;
 let sharedNoiseCtxRate = 0;
 
 /** One second of white noise, cached per sample rate. */
-function noiseBuffer(ctx: BaseAudioContext): AudioBuffer {
+export function noiseBuffer(ctx: BaseAudioContext): AudioBuffer {
   if (sharedNoise && sharedNoiseCtxRate === ctx.sampleRate) return sharedNoise;
   const buf = ctx.createBuffer(1, Math.floor(ctx.sampleRate), ctx.sampleRate);
   const d = buf.getChannelData(0);
@@ -275,6 +276,11 @@ export class AudioEngine {
   private ambience: GainNode | null = null;
   private beamGain: GainNode | null = null;
   private droneNodes: AudioNode[] = [];
+  private bed: Bed | null = null;
+  private scene: SoundscapeDef | null = null;
+  private sceneId = '';
+  private nextToll = 0;
+  private intensity = 0;
   private volume = 0.8;
   private enabled = true;
   /** Cheap flood control: at most one of each cue per this many ms. */
@@ -322,54 +328,62 @@ export class AudioEngine {
     this.beamGain.gain.value = 0;
     this.beamGain.connect(this.sfx);
     this.startBeam(ctx, this.beamGain);
-    this.startDrone(ctx, this.ambience);
   }
 
   /**
-   * The drone bed: three detuned low oscillators and a wind of filtered noise,
-   * with a slow filter sweep. Sparse and low, per the brief — it should read as
-   * the planet breathing rather than as music.
+   * Swaps the bed when the player changes place.
+   *
+   * Crossfaded rather than cut: arriving somewhere new should feel like the
+   * room changing, not like a track ending. The old bed is released once it has
+   * faded, so beds never accumulate.
    */
-  private startDrone(ctx: AudioContext, dest: AudioNode): void {
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = 220;
-    filter.Q.value = 1.4;
-    filter.connect(dest);
-
-    for (const [freq, detune, gain] of [[41.2, 0, 0.5], [41.2, 7, 0.36], [61.7, -5, 0.22]] as const) {
-      const osc = ctx.createOscillator();
-      osc.type = 'sawtooth';
-      osc.frequency.value = freq;
-      osc.detune.value = detune;
-      const g = ctx.createGain();
-      g.gain.value = gain * 0.34;
-      osc.connect(g).connect(filter);
-      osc.start();
-      this.droneNodes.push(osc);
+  setScene(planetId: string, zoneKind: string, intensity: number): void {
+    if (!this.ctx || !this.ambience) return;
+    const def = soundscapeFor(planetId, zoneKind);
+    const swapped = def.id !== this.sceneId;
+    if (swapped) {
+      this.sceneId = def.id;
+      const now = this.ctx.currentTime;
+      const old = this.bed;
+      if (old) {
+        old.stop(now);
+        setTimeout(() => old.output.disconnect(), 4000);
+      }
+      const bed = buildBed(this.ctx, def, noiseBuffer(this.ctx));
+      bed.output.gain.setValueAtTime(0.0001, now);
+      bed.output.gain.setTargetAtTime(1, now, 1.5);
+      bed.output.connect(this.ambience);
+      this.bed = bed;
+      this.scene = def;
+      this.nextToll = performance.now() + (def.toll?.everyMs[0] ?? 30000);
     }
+    // Called every frame, so only push a change when there is one: a
+    // setTargetAtTime sixty times a second is sixty scheduled ramps a second.
+    // A freshly built bed always gets one, or it would sit at its constructed
+    // default until the player happened to change intensity.
+    if (swapped || Math.abs(intensity - this.intensity) > 0.01) {
+      this.bed?.setIntensity(intensity);
+      this.intensity = intensity;
+    }
+  }
 
-    const wind = ctx.createBufferSource();
-    wind.buffer = noiseBuffer(ctx);
-    wind.loop = true;
-    const windFilter = ctx.createBiquadFilter();
-    windFilter.type = 'bandpass';
-    windFilter.frequency.value = 420;
-    windFilter.Q.value = 0.6;
-    const windGain = ctx.createGain();
-    windGain.gain.value = 0.05;
-    wind.connect(windFilter).connect(windGain).connect(dest);
-    wind.start();
-    this.droneNodes.push(wind);
-
-    // A very slow sweep, so the bed never settles into a loop the ear can catch.
-    const lfo = ctx.createOscillator();
-    lfo.frequency.value = 0.031;
-    const lfoGain = ctx.createGain();
-    lfoGain.gain.value = 90;
-    lfo.connect(lfoGain).connect(filter.frequency);
-    lfo.start();
-    this.droneNodes.push(lfo);
+  /**
+   * The sparse half of the score. A single struck tone every half-minute or so,
+   * scheduled from the soundscape's own interval range — the brief asks for few
+   * cues, and this is the only thing in the bed that is an event at all.
+   */
+  private maybeToll(): void {
+    if (!this.ctx || !this.ambience || !this.scene?.toll) return;
+    const now = performance.now();
+    if (now < this.nextToll) return;
+    const [lo, hi] = this.scene.toll.everyMs;
+    // Quieter when docked: the ship is not the place for a bell.
+    this.nextToll = now + lo + Math.random() * (hi - lo);
+    const gain = this.ctx.createGain();
+    gain.gain.value = 0.5 + this.intensity * 0.5;
+    gain.connect(this.ambience);
+    playToll(this.ctx, gain, this.scene, this.ctx.currentTime);
+    setTimeout(() => gain.disconnect(), (this.scene.toll.dur + 1) * 1000);
   }
 
   /** The solar lance runs continuously; its gain is driven by the beam ramp. */
@@ -417,11 +431,12 @@ export class AudioEngine {
     });
   }
 
-  /** Continuous state that is not event-driven: the beam's whine. */
+  /** Continuous state that is not event-driven: the beam's whine, and the bed. */
   update(firing: boolean, beamRamp: number, isBeam: boolean): void {
     if (!this.ctx || !this.beamGain) return;
     const want = isBeam && firing ? 0.05 + beamRamp * 0.14 : 0;
     this.beamGain.gain.setTargetAtTime(want, this.ctx.currentTime, 0.04);
+    this.maybeToll();
   }
 
   consumeEvents(events: SimEvent[], playerY: number): void {

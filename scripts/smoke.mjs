@@ -49,6 +49,34 @@ if (!existsSync(reportPath)) {
 const report = JSON.parse(await readFile(reportPath, 'utf8'));
 
 /**
+ * Three beds that differ only in level are not three identities. This checks
+ * each one is audible and unclipped, and that every pair is separated on
+ * loudness or on brightness by a margin an ear would actually notice.
+ */
+function bedsOk(beds) {
+  if (!beds) return { ok: false, problems: ['no soundscape report'], ids: [] };
+  const ids = Object.keys(beds);
+  const problems = [];
+  for (const id of ids) {
+    const b = beds[id];
+    if (b.rms < 0.002) problems.push(`${id} bed is inaudible (rms ${b.rms})`);
+    if (b.peak > 1.0) problems.push(`${id} bed clips (peak ${b.peak})`);
+  }
+  for (let i = 0; i < ids.length; i++) {
+    for (let j = i + 1; j < ids.length; j++) {
+      const a = beds[ids[i]];
+      const b = beds[ids[j]];
+      const dRms = Math.abs(a.rms - b.rms) / Math.max(a.rms, b.rms, 1e-9);
+      const dBright = Math.abs(a.brightness - b.brightness) / Math.max(a.brightness, b.brightness, 1);
+      if (dRms < 0.12 && dBright < 0.12) {
+        problems.push(`${ids[i]} and ${ids[j]} sound alike (rms ${dRms.toFixed(2)}, brightness ${dBright.toFixed(2)})`);
+      }
+    }
+  }
+  return { ok: problems.length === 0 && ids.length >= 3, problems, ids };
+}
+
+/**
  * A cue is good if it makes sound (peak well above noise), does not clip, and
  * ends. Those three are exactly the failure modes of synthesised audio you
  * cannot hear.
@@ -96,12 +124,20 @@ const checks = [
   ['route runs while docked', !!report.route?.zoneId],
   ['docked screens render', report.screensCaptured === 5],
   ['every audio cue is audible', audioOk(report.audio).ok],
+  ['each place has its own soundscape', bedsOk(report.soundscapes).ok],
 ];
 
 if (report.audio) {
   const a = audioOk(report.audio);
   console.log(`\n  audio: ${a.count} cues rendered, peak ${a.minPeak}–${a.maxPeak}, ${a.shortest}s–${a.longest}s`);
   for (const bad of a.problems) console.log(`    PROBLEM  ${bad}`);
+}
+
+if (report.soundscapes) {
+  const b = bedsOk(report.soundscapes);
+  const rows = b.ids.map((id) => `${id} rms ${report.soundscapes[id].rms} bright ${report.soundscapes[id].brightness}Hz`);
+  console.log(`  score: ${rows.join('  |  ')}`);
+  for (const bad of b.problems) console.log(`    PROBLEM  ${bad}`);
 }
 
 let failed = 0;

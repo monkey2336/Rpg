@@ -255,9 +255,26 @@ exactly the three failure modes of synthesised audio you cannot hear.
 
 The master bus ends in a `DynamicsCompressor` acting as a limiter, because
 procedural cues stack unpredictably in a firefight and clipping is the fastest
-way to sound cheap. Two continuous sources sit outside the cue system: the drone
-bed (three detuned low oscillators plus filtered wind, on a very slow filter
-sweep) and the solar lance's whine, whose gain follows the beam ramp.
+way to sound cheap.
+
+**The score** is a bed per place, defined as data in `soundscape.ts`: a root, a
+stack of intervals above it, a filter character, a texture layer and an
+occasional struck toll. Khadir gets an open fifth under a dry high wind; Sabb a
+minor third that never resolves, lower and duller; orbital zones get no wind at
+all, because vacuum has none — just a tight resonant hull band and a metallic
+toll. Beds crossfade when the player changes place, so arriving somewhere reads
+as the room changing rather than a track ending.
+
+Intensity (docked → deployed → boss) opens the bed's filter and lifts its gain.
+It never raises a tempo, because this score does not have one. That is the
+brief's "sparse, low-frequency, drone-forward, long tracks, few cues" taken
+literally: the only *event* in the whole bed is the toll.
+
+Verification goes further than "does it make sound". Three beds that differ only
+in level are not three identities, so the smoke run renders each offline and
+compares loudness and a zero-crossing brightness proxy, failing if any pair is
+within 12% on both. The solar lance's whine is the only other continuous source;
+its gain follows the beam ramp.
 
 Audio starts on the pointer-lock click, because browsers refuse to open an audio
 context without a user gesture and that click is the natural moment.

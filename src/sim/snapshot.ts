@@ -70,6 +70,13 @@ export interface FullSnapshot {
     reloadProgress: number;
     dps: number;
   } | null;
+  /**
+   * Where the player currently is, whether or not they are deployed.
+   *
+   * Presentation needs this while docked too — the score follows the planet you
+   * are at, not only the arena you happen to be standing in.
+   */
+  place: { planetId: string; zoneId: string; zoneKind: string; accent: string };
   route: WidgetSnapshot;
   arena: ArenaSnapshot | null;
   notices: string[];
@@ -224,6 +231,7 @@ export function buildFullSnapshot(session: Session, notices: string[] = [], even
   const p = state.player.defences;
   const w = d.weapon;
   const pr = session.arena?.player;
+  const currentZone = getZone(session.arena?.zoneId ?? state.currentZone);
 
   return {
     kind: 'full',
@@ -261,6 +269,12 @@ export function buildFullSnapshot(session: Session, notices: string[] = [], even
           dps: w.dps,
         }
       : null,
+    place: {
+      planetId: currentZone.planetId,
+      zoneId: currentZone.id,
+      zoneKind: currentZone.kind,
+      accent: currentZone.accent,
+    },
     route: buildWidgetSnapshot(session),
     arena: session.arena ? buildArenaSnapshot(session.arena) : null,
     notices,

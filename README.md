@@ -27,7 +27,7 @@ and offline progression that provably matches live play.
 | Prestige axis | Implemented; unlocks at level 25 and pays out on depth. |
 | 10–14 bosses, 4–6 planets, full content set | Three bosses, three zones, two planets. The rest is authoring, not engineering — see below. |
 | Travel layer: fuel as a soft cost | Done. Crossing planets costs fuel; it refills while docked. Same-planet travel is free. |
-| Audio | Weapon feel and combat audio built, procedurally synthesised — no sample files. Score and per-planet identity not built. |
+| Audio | Combat audio, weapon feel, and a drone score with a distinct bed per place — all synthesised at runtime, no sample files. |
 
 ## Running it
 
@@ -79,8 +79,10 @@ bench     deployed 1.4us/tick   = 0.01% of one core at 40Hz
           docked   0.22us/tick  = 0.001% of one core at 40Hz
           48h of offline resolved closed-form in 8.9ms, 6MB heap
 parity    every duration tested matches by state hash, exactly
-smoke     12 window, boss and audio assertions against the running app;
-          21 audio cues rendered offline, peak 0.03-0.92, 0.05s-1.64s
+smoke     13 window, boss and audio assertions against the running app;
+          22 cues rendered offline, peak 0.03-0.92, 0.05s-1.64s;
+          3 score beds rendered and checked for being distinct from each other,
+          not merely present (Sabb reads 3x duller than Khadir)
 ```
 
 Runs got ~10% longer when hitstop landed, which is the point: the world now

@@ -273,6 +273,39 @@ async function smokeTest(): Promise<void> {
         return out;
       })()
     `);
+
+    // The score's identities, measured rather than assumed. Three beds that
+    // differ only in volume are not three identities, so this renders each one
+    // and compares loudness and brightness across them.
+    report.soundscapes = await windows.full.webContents.executeJavaScript(`
+      (async () => {
+        const [ss, au] = await Promise.all([import('./soundscape.js'), import('./audio.js')]);
+        const out = {};
+        for (const id of ss.SOUNDSCAPE_IDS) {
+          const ctx = new OfflineAudioContext(1, 48000 * 4, 48000);
+          const bed = ss.buildBed(ctx, ss.SOUNDSCAPES[id], au.noiseBuffer(ctx));
+          bed.output.connect(ctx.destination);
+          bed.setIntensity(1);
+          ss.playToll(ctx, ctx.destination, ss.SOUNDSCAPES[id], 0.5);
+          const buf = await ctx.startRendering();
+          const d = buf.getChannelData(0);
+          let peak = 0, sum = 0, crossings = 0;
+          for (let i = 1; i < d.length; i++) {
+            const v = Math.abs(d[i]);
+            if (v > peak) peak = v;
+            sum += v * v;
+            if ((d[i] >= 0) !== (d[i - 1] >= 0)) crossings++;
+          }
+          out[id] = {
+            peak: Math.round(peak * 1000) / 1000,
+            rms: Math.round(Math.sqrt(sum / d.length) * 10000) / 10000,
+            // Zero crossings per second: a crude but honest brightness proxy.
+            brightness: Math.round(crossings / 4),
+          };
+        }
+        return out;
+      })()
+    `);
     report.route = host.session.state.route;
     report.restoredVisible = windows.full.isVisible();
     report.ok = true;

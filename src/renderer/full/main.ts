@@ -260,6 +260,12 @@ function frame(now: number): void {
   }
   paintTop(snapshot);
   paintBottom(snapshot);
+
+  // The score follows the place, and lifts for a fight. It never speeds up —
+  // intensity opens the bed's filter rather than adding a tempo this music
+  // does not have.
+  const intensity = !deployed ? 0 : snapshot.arena?.boss ? 1.5 : 1;
+  audio.setScene(snapshot.place.planetId, snapshot.place.zoneKind, intensity);
 }
 
 function paintTop(s: FullSnapshot): void {
