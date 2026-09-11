@@ -75,7 +75,13 @@ window.addEventListener('keydown', (e) => {
   if (e.code === 'Digit1') void api.command('swap-slot', { slot: 0 });
   if (e.code === 'Digit2') void api.command('swap-slot', { slot: 1 });
   if (e.code === 'Digit3') void api.command('swap-slot', { slot: 2 });
-  if (e.code === 'Escape' && snapshot?.mode === 'zone') void command('return-to-ship');
+  if (e.code === 'Escape' && snapshot?.mode === 'zone') {
+    // Esc is how you get your cursor back, so the first press only releases the
+    // lock — the browser does that itself. Abandoning the run takes a second
+    // press, once you can already see the pointer. Losing a run to a reflex
+    // press of Esc is not a thing this should do.
+    if (!pointerLocked) void command('return-to-ship');
+  }
   if (e.code === 'Backquote') void api.setMode('widget');
 });
 window.addEventListener('keyup', (e) => {
@@ -87,12 +93,26 @@ window.addEventListener('blur', () => {
   firing = false;
 });
 
-// Pointer lock is what makes mouse-look feel like a game rather than a canvas.
-// It is also the user gesture browsers require before audio may start, so it is
-// the natural place to bring the mixer up.
-canvas.addEventListener('click', () => {
+/**
+ * Taking the controls.
+ *
+ * The listener is on the whole stage, not on the canvas: anything that ends up
+ * layered over the view would otherwise be able to swallow the one click the
+ * player needs to make, which is exactly the bug this replaced. Clicking
+ * anywhere in the game area works.
+ *
+ * It is also the user gesture browsers require before audio may start, so it is
+ * the natural place to bring the mixer up.
+ */
+$('#stage').addEventListener('click', () => {
   audio.resume();
-  if (!pointerLocked && snapshot?.mode === 'zone') void canvas.requestPointerLock();
+  if (pointerLocked || snapshot?.mode !== 'zone') return;
+  // requestPointerLock rejects rather than throws — most often during the
+  // browser's cooldown right after Esc released the previous lock. Swallowing
+  // that leaves the player clicking at a prompt that never goes away.
+  Promise.resolve(canvas.requestPointerLock() as unknown as Promise<void> | undefined)?.catch(() => {
+    note('Could not take the controls — wait a moment and click again.');
+  });
 });
 document.addEventListener('pointerlockchange', () => {
   pointerLocked = document.pointerLockElement === canvas;

@@ -121,12 +121,21 @@ button.active { background: var(--panel-edge); color: var(--ink); border-color: 
   background: radial-gradient(ellipse at center, rgba(0,0,0,0) 42%, rgba(150,32,20,0.55) 100%);
 }
 
+/*
+ * The prompt that asks you to click must not be the thing that eats the click.
+ *
+ * Every other layer over the game view sets pointer-events: none; this one did
+ * not, so it sat on top of the canvas, swallowed the click meant to acquire
+ * pointer lock, and made the game unplayable in full mode. Nothing overlaying
+ * #stage may be interactive unless it owns a control the player needs to press.
+ */
 #lock-hint {
   position: absolute;
   inset: 0;
   display: none;
   place-items: center;
   background: rgba(13, 11, 9, 0.35);
+  pointer-events: none;
 }
 #lock-hint.on { display: grid; }
 #lock-hint span {

@@ -119,6 +119,11 @@ const checks = [
   ['widget never takes focus', report.widgetFocusable === false],
   ['full window hides while docked', report.fullVisible === false],
   ['full window restores', report.restoredVisible === true],
+  // The check that would have caught an unplayable build.
+  // Guard against the probe passing because it never ran properly.
+  ['the input probe actually saw a deployed view', report.input?.deployed === true && report.input?.viewWidth > 0 && report.input?.lockHintVisible === true],
+  ['a click reaches the game view', report.input?.clickReachesView === true],
+  ['nothing overlays the view and eats clicks', (report.input?.blockers ?? ['unknown']).length === 0],
   ['boss encounter rendered', report.arena?.bossSpawned === true],
   ['all three bosses reachable and rendered', !!report.bosses && Object.values(report.bosses).every(Boolean) && Object.keys(report.bosses).length === 3],
   ['route runs while docked', !!report.route?.zoneId],
@@ -138,6 +143,15 @@ if (report.soundscapes) {
   const rows = b.ids.map((id) => `${id} rms ${report.soundscapes[id].rms} bright ${report.soundscapes[id].brightness}Hz`);
   console.log(`  score: ${rows.join('  |  ')}`);
   for (const bad of b.problems) console.log(`    PROBLEM  ${bad}`);
+}
+
+if (report.input) {
+  const i = report.input;
+  console.log(
+    `  input: view ${i.viewWidth}px, prompt ${i.lockHintVisible ? 'up' : 'down'}, centre hits ${i.elementAtCentre}, ` +
+      `click ${i.clickReachesView ? 'reaches' : 'DOES NOT REACH'} the view` +
+      (i.blockers?.length ? `, blocked by ${i.blockers.join(', ')}` : ''),
+  );
 }
 
 let failed = 0;

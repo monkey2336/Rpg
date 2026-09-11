@@ -138,8 +138,59 @@ async function smokeTest(): Promise<void> {
     // Drive with the reference bot so the captures show the game actually being
     // played, not a mannequin on an empty terrace. The host reads whatever input
     // frame is current, so pushing one per sim tick is exactly what a human does.
-    // The pointer-lock prompt is correct behaviour but would sit over every
-    // capture, so the harness dismisses it before shooting.
+    /*
+     * Before anything else: can a player actually take the controls?
+     *
+     * This harness used to drive the game by calling host.setInput() directly
+     * and hiding the pointer-lock prompt before capturing — so the one path it
+     * never exercised was the real one, through the DOM. The prompt that says
+     * "click to take the controls" was itself swallowing that click, and the
+     * game was unplayable in full mode while every assertion here stayed green.
+     *
+     * So the input path is now checked first, on the live window, in the state
+     * a player is actually in.
+     */
+    report.input = await windows.full.webContents.executeJavaScript(`(async () => {
+      // Wait for the renderer to actually be showing the zone. Probing the
+      // instant after the host lands measures a hidden stage with zero size,
+      // which is a race, not a test — and it reports a failure that has nothing
+      // to do with the thing being checked.
+      const stage = document.getElementById('stage');
+      const view = document.getElementById('view');
+      const deadline = Date.now() + 8000;
+      while (Date.now() < deadline) {
+        const r = view.getBoundingClientRect();
+        if (stage.classList.contains('on') && r.width > 0 && document.getElementById('lock-hint').classList.contains('on')) break;
+        await new Promise((res) => setTimeout(res, 100));
+      }
+      const r = view.getBoundingClientRect();
+      const cx = r.left + r.width / 2;
+      const cy = r.top + r.height / 2;
+      const hit = document.elementFromPoint(cx, cy);
+
+      let reached = false;
+      view.addEventListener('click', () => { reached = true; }, { once: true });
+      if (hit) hit.dispatchEvent(new MouseEvent('click', { bubbles: true, clientX: cx, clientY: cy }));
+
+      // Anything layered over the view that still accepts clicks, other than
+      // the end-of-run panel, which owns buttons the player has to press.
+      const blockers = [...document.getElementById('stage').children]
+        .filter((el) => el.id !== 'view' && el.id !== 'overlay')
+        .filter((el) => getComputedStyle(el).pointerEvents !== 'none')
+        .map((el) => el.id || el.tagName);
+
+      return {
+        deployed: stage.classList.contains('on'),
+        viewWidth: Math.round(r.width),
+        lockHintVisible: document.getElementById('lock-hint').classList.contains('on'),
+        elementAtCentre: hit ? (hit.id || hit.tagName) : null,
+        clickReachesView: reached,
+        blockers,
+      };
+    })()`);
+
+    // The prompt is correct behaviour but would sit over every capture, so the
+    // harness dismisses it only after the check above has run against it.
     await windows.full.webContents.executeJavaScript(
       `document.getElementById('lock-hint').style.display = 'none'`,
     );

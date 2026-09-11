@@ -109,7 +109,9 @@ On a headless Linux box `npm run smoke` wraps itself in `xvfb-run`.
 
 ## Controls
 
-Click the view to take the controls (pointer lock).
+Click anywhere in the game view to take the controls (pointer lock). `Esc`
+releases the mouse; pressing it again while the cursor is free returns you to
+the ship, so a reflex press of `Esc` never costs you a run.
 
 `W A S D` move · mouse look · left click fire · `Space` jump · `Shift` dodge (i-frames)
 `R` reload · `E` channel a deposit or scan site · `1`/`2`/`3` weapon slots
