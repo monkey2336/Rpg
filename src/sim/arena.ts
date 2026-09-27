@@ -131,7 +131,6 @@ export interface PlayerRuntime {
   dodgeYaw: number;
   /** Solar lance ramp: rises while a beam stays on target, decays otherwise. */
   beamRamp: number;
-  interactProgress: number;
   interactTargetId: number;
   aimYaw: number;
   aimPitch: number;
@@ -356,7 +355,6 @@ export function createArena(zoneId: string, seed: number, playerDefences: Defenc
       dodgeCooldown: 0,
       dodgeYaw: 0,
       beamRamp: 0,
-      interactProgress: 0,
       interactTargetId: -1,
       aimYaw: 0,
       aimPitch: 0,
@@ -1456,7 +1454,17 @@ export interface StepContext {
   gate: { kills: number; deposits: number; scans: number };
 }
 
-const INTERACT_RANGE = 46;
+/**
+ * How close you must stand to channel a deposit or a scan site.
+ *
+ * Exported because the renderer draws the prompt at exactly this distance,
+ * and a prompt that appears at a different radius from the one the sim
+ * checks is worse than no prompt: it tells the player the game is broken.
+ *
+ * Was 46, which is a shade over one body-length, with nothing on screen to
+ * say you had arrived.
+ */
+export const INTERACT_RANGE = 64;
 
 /**
  * Spawns the visible half of a drop. `sim.ts` has already banked the item.

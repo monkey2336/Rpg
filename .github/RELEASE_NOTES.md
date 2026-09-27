@@ -6,8 +6,8 @@ corner of your desktop and let it run itself.
 
 | | |
 |---|---|
-| **`Cenotaph-0.1.2-portable.exe`** | **Start here.** Double-click and it runs. No install. |
-| `Cenotaph-0.1.2-x64.exe` | Installer — Start Menu entry, desktop shortcut, choose your own folder. |
+| **`Cenotaph-0.1.3-portable.exe`** | **Start here.** Double-click and it runs. No install. |
+| `Cenotaph-0.1.3-x64.exe` | Installer — Start Menu entry, desktop shortcut, choose your own folder. |
 
 **Windows will block it on first run.** The build is unsigned — signing needs a
 paid certificate tied to a real publisher — so SmartScreen shows *"Windows
@@ -18,6 +18,28 @@ reassurance here is that every line of this one is in the repo and
 
 It uses Electron's default icon. A real one is an art task, and a placeholder
 would be worse than none.
+
+## New in 0.1.3
+
+**You can find the deposits and scan sites now.** The gate wants three mined
+and two scanned, and the game never told you where any of them were: six dark
+rocks and five short posts at random bearings across a disc twelve hundred
+units wide, no marker, no prompt when you were finally standing on one, and a
+four-second channel that shows nothing at all if you tap `E` instead of
+holding it. The mechanic worked. There was no way to know that.
+
+Objectives are now marked. The ones you still need show a diamond with their
+distance, clamped to the edge of the screen with an arrow when they are behind
+you. Stand close enough and the marker says **HOLD E** — and it means hold;
+mining takes about four seconds and scanning about six, with a ring that
+closes as you channel. Markers for a requirement you have already met go away
+rather than cluttering the screen, and the sites themselves now carry a lit
+seam so they read as somewhere to go rather than as scenery.
+
+The range you have to be inside was also a shade over one body-length. It is
+about half again as much now, and the prompt appears at exactly that radius —
+the renderer reads the number out of the simulation rather than keeping its
+own copy.
 
 ## New in 0.1.2
 

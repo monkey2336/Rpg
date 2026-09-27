@@ -385,9 +385,34 @@ already states: a set-piece has to start from a known state or nobody can learn
 it. So the boss withdraws, the gate stays met, and the player replays the fight
 without replaying the grind that unlocked it.
 
+**An objective you cannot find is an objective that does not work.** The gate
+asks for three deposits mined and two sites scanned. Those were six dark rocks
+and five short posts at random bearings across a disc twelve hundred units
+wide, with nothing on screen pointing at any of them, no prompt when you were
+finally standing on one, and a four-second channel that shows nothing if you
+tap the key instead of holding it. Every part of the mechanic worked. The
+reasonable conclusion from inside the game was that it did not, and that is
+what got reported.
+
+`drawObjectives` marks the sites you still need — the nearest `remaining + 1`
+of each kind, so the spare stops "nearest" from being an instruction — clamped
+to the screen edge with an arrow when one is behind you, carrying its distance.
+In range the label becomes `HOLD E`, and it says *hold*. Markers for a
+satisfied requirement disappear entirely rather than dimming; the sites stay
+lit in the world for anyone who wants the extra materials.
+
+`INTERACT_RANGE` is **exported from the sim and imported by the renderer**.
+The prompt appears at exactly the radius the simulation checks. A prompt drawn
+from a copied constant that later drifts is worse than no prompt: it tells the
+player the game is broken at precisely the moment they are standing in the
+right place.
+
 > Enforced by `test/run-recovery.test.ts` — gate progress across a death, the
-> boss withdrawing while the gate holds, the air being cleared, and the drop
-> lifecycle from spawn through magnet to pickup.
+> boss withdrawing while the gate holds, the air being cleared, the drop
+> lifecycle from spawn through magnet to pickup, and mining and scanning from
+> a standing start: that they complete, how long they take, that they work
+> just inside `INTERACT_RANGE` and not just outside it, and that every zone
+> spawns more sites than its gate needs, all inside the wall.
 
 ---
 

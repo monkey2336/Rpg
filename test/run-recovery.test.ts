@@ -12,7 +12,9 @@
 import { strict as assert } from 'node:assert';
 import { describe, it } from 'node:test';
 import {
+  ARENA_RADIUS,
   createArena,
+  INTERACT_RANGE,
   NEUTRAL_INPUT,
   playerEntity,
   revivePlayer,
@@ -191,5 +193,108 @@ describe('drops on the ground', () => {
     const d = a.drops[0];
     assert.ok(d, 'a drop out of reach should still be there');
     assert.ok(d!.y <= 9, `expected it to settle on the sand, it is at y=${d!.y.toFixed(1)}`);
+  });
+});
+
+describe('mining and scanning', () => {
+  it('mines a deposit you are standing on, in a bearable time', () => {
+    const { a, ctx } = fixture();
+    const p = playerEntity(a);
+    const dep = a.deposits[0]!;
+    p.x = dep.x;
+    p.z = dep.z;
+
+    let ticks = 0;
+    let mined: unknown;
+    for (; ticks < 2000 && !mined; ticks++) {
+      const events = stepArena(a, { ...NEUTRAL_INPUT, interact: true }, ctx);
+      mined = events.find((e) => e.type === 'mined');
+      // Keep it standing on the site; waves push nothing here, but the
+      // player drifts if anything nudges it.
+      p.x = dep.x;
+      p.z = dep.z;
+    }
+    assert.ok(mined, 'holding the interact key on a deposit must mine it');
+    assert.equal(a.minedCount, 1);
+    // 40 ticks a second. Long enough to be a commitment, short enough that a
+    // player holding the key does not conclude the key does nothing.
+    assert.ok(ticks < 40 * 8, `mining took ${(ticks / 40).toFixed(1)}s`);
+    assert.ok(ticks > 40, `mining took ${(ticks / 40).toFixed(1)}s — too fast to read as a channel`);
+  });
+
+  it('scans a site you are standing on', () => {
+    const { a, ctx } = fixture();
+    const p = playerEntity(a);
+    // Mining wins the if/else when both are in reach, so clear the deposits
+    // to be certain this exercises the scan branch and not the last test again.
+    for (const d of a.deposits) d.depleted = true;
+    const site = a.scans[0]!;
+    p.x = site.x;
+    p.z = site.z;
+
+    let scanned: unknown;
+    for (let i = 0; i < 2000 && !scanned; i++) {
+      const events = stepArena(a, { ...NEUTRAL_INPUT, interact: true }, ctx);
+      scanned = events.find((e) => e.type === 'scanned');
+      p.x = site.x;
+      p.z = site.z;
+    }
+    assert.ok(scanned, 'holding the interact key on a scan site must scan it');
+    assert.equal(a.scannedCount, 1);
+  });
+
+  it('works right up to the advertised range, and not past it', () => {
+    // The renderer draws "HOLD E" at exactly INTERACT_RANGE. A prompt that
+    // appears at a different radius from the one the sim checks is worse
+    // than no prompt — it tells the player the game is broken.
+    const inside = (() => {
+      const { a, ctx } = fixture();
+      const p = playerEntity(a);
+      const dep = a.deposits[0]!;
+      p.x = dep.x + INTERACT_RANGE - 3;
+      p.z = dep.z;
+      for (let i = 0; i < 400; i++) {
+        stepArena(a, { ...NEUTRAL_INPUT, interact: true }, ctx);
+        p.x = dep.x + INTERACT_RANGE - 3;
+        p.z = dep.z;
+      }
+      return a.deposits[0]!.progress;
+    })();
+    assert.ok(inside > 0, 'a deposit just inside the prompt radius must channel');
+
+    const outside = (() => {
+      const { a, ctx } = fixture();
+      const p = playerEntity(a);
+      const dep = a.deposits[0]!;
+      p.x = dep.x + INTERACT_RANGE + 8;
+      p.z = dep.z;
+      for (let i = 0; i < 400; i++) {
+        stepArena(a, { ...NEUTRAL_INPUT, interact: true }, ctx);
+        p.x = dep.x + INTERACT_RANGE + 8;
+        p.z = dep.z;
+      }
+      return a.deposits[0]!.progress;
+    })();
+    assert.equal(outside, 0, 'a deposit outside the prompt radius must not channel');
+  });
+
+  it('puts enough sites on the field to satisfy the gate twice over', () => {
+    // Six deposits for three, five scans for two. A gate you can fail by
+    // depleting the map is a gate that can strand a run.
+    const { a } = fixture();
+    const gate = getZone('ochre-shelf').gate;
+    assert.ok(a.deposits.length > gate.deposits, `${a.deposits.length} deposits for a gate of ${gate.deposits}`);
+    assert.ok(a.scans.length > gate.scans, `${a.scans.length} scan sites for a gate of ${gate.scans}`);
+  });
+
+  it('keeps every site inside the arena the player can walk', () => {
+    // A site outside the wall is a gate that cannot be met at all.
+    const { a } = fixture();
+    for (const d of a.deposits) {
+      assert.ok(Math.hypot(d.x, d.z) < ARENA_RADIUS, `deposit at ${Math.hypot(d.x, d.z).toFixed(0)} is outside the arena`);
+    }
+    for (const sc of a.scans) {
+      assert.ok(Math.hypot(sc.x, sc.z) < ARENA_RADIUS, `scan site at ${Math.hypot(sc.x, sc.z).toFixed(0)} is outside the arena`);
+    }
   });
 });

@@ -14,6 +14,7 @@
 import * as THREE from '../vendor/three.module.js';
 import type { ArenaSnapshot } from '../../sim/snapshot.js';
 import { animateActor, buildHostile, buildPlayer, disposeActor, type Actor } from './actors.js';
+import { INTERACT_RANGE } from '../../sim/arena.js';
 import { aimAngles, convergeDistance, solveRig, type RigTarget } from './rig.js';
 import { DAMAGE_COLOR, Fx } from './fx.js';
 
@@ -404,17 +405,30 @@ export class Scene3D {
     this.depositMeshes = [];
     this.scanMeshes = [];
     for (const d of snap.deposits) {
+      // A near-black rock on dark sand is scenery. A deposit is a place the
+      // player has been told to go, so it has to be findable once the marker
+      // has pointed at it: a seam of ore in the material's own colour.
+      const node = new THREE.Group();
       const rock = new THREE.Mesh(
         new THREE.DodecahedronGeometry(13, 0),
         new THREE.MeshLambertMaterial({ color: 0x2e2016 }),
       );
-      rock.position.set(d.x, 5, d.z);
       rock.rotation.set(rnd(), rnd(), rnd());
       rock.scale.set(1, 0.7, 1.1);
       rock.castShadow = true;
       rock.receiveShadow = true;
-      this.scene.add(rock);
-      this.depositMeshes.push(rock);
+      rock.position.y = 5;
+      node.add(rock);
+      const seam = new THREE.Mesh(
+        new THREE.OctahedronGeometry(5.5, 0),
+        new THREE.MeshLambertMaterial({ color: 0x3a2a18, emissive: this.accent, emissiveIntensity: 1.3 }),
+      );
+      seam.position.set(0, 11, 0);
+      seam.scale.set(1, 0.7, 1);
+      node.add(seam);
+      node.position.set(d.x, 0, d.z);
+      this.scene.add(node);
+      this.depositMeshes.push(node);
     }
     for (const s of snap.scans) {
       const post = new THREE.Group();
@@ -1032,6 +1046,8 @@ export class Scene3D {
     }
     ctx.globalAlpha = 1;
 
+    if (snap.outcome === 'running') this.drawObjectives(ctx, snap, W, H, dpr);
+
     // A hairline reticle, dead centre, that opens with recoil.
     if (snap.outcome === 'running') {
       const cx = W / 2;
@@ -1047,6 +1063,166 @@ export class Scene3D {
       }
       ctx.stroke();
     }
+  }
+
+  /**
+   * Markers over the deposits and scan sites.
+   *
+   * The gate asks for three mined and two scanned. The sites were six dark
+   * rocks and five short posts scattered at random bearings across a disc
+   * twelve hundred units wide, with nothing on screen pointing at any of
+   * them and no prompt when you were finally standing on one. The reasonable
+   * conclusion from inside the game was that mining did not work, and that
+   * is exactly what got reported.
+   *
+   * So: a marker on every live site, clamped to the screen edge with an
+   * arrow when it is behind you or out of frame, carrying its distance. In
+   * range it says what key to hold — and it says *hold*, because the channel
+   * is four seconds and a tap does nothing visible.
+   */
+  private drawObjectives(
+    ctx: CanvasRenderingContext2D,
+    snap: ArenaSnapshot,
+    W: number,
+    H: number,
+    dpr: number,
+  ): void {
+    const px = snap.player.x;
+    const pz = snap.player.z;
+    // Asymmetric, because the chrome is: the stat bar across the top, and the
+    // defence bars and weapon readout along the bottom corners. A marker
+    // clamped to a symmetric ring slides under all three.
+    const mx = 52 * dpr;
+    const mTop = 64 * dpr;
+    const mBottom = 104 * dpr;
+    const v = new THREE.Vector3();
+    const cam = new THREE.Vector3();
+
+    interface Target { x: number; z: number; label: string; progress: number; needed: boolean }
+
+    /**
+     * The nearest sites you still need, and one spare.
+     *
+     * Marking all eleven pinned a row of labels along the top edge that
+     * overlapped each other and said nothing useful — a map of the whole
+     * terrace when the question is "where do I go next". The spare is there
+     * so the nearest one being across the arena is not an instruction.
+     * Once a requirement is met its markers go entirely; the sites are still
+     * lit in the world for anyone who wants the extra materials.
+     */
+    const pick = (
+      sites: readonly { x: number; z: number; progress: number }[],
+      have: number,
+      need: number,
+      label: string,
+    ): Target[] => {
+      const remaining = need - have;
+      if (remaining <= 0) return [];
+      return sites
+        .map((sc) => ({ sc, d: Math.hypot(sc.x - px, sc.z - pz) }))
+        .sort((l, r) => l.d - r.d)
+        .slice(0, remaining + 1)
+        .map(({ sc }) => ({ x: sc.x, z: sc.z, label, progress: sc.progress, needed: true }));
+    };
+
+    const targets: Target[] = [
+      ...pick(
+        snap.deposits.filter((d) => !d.depleted),
+        snap.gate.deposits,
+        snap.gate.depositsNeeded,
+        'MINE',
+      ),
+      ...pick(
+        snap.scans.filter((sc) => !sc.done),
+        snap.gate.scans,
+        snap.gate.scansNeeded,
+        'SCAN',
+      ),
+    ];
+    if (targets.length === 0) return;
+
+    ctx.textAlign = 'center';
+    ctx.lineWidth = Math.max(1, dpr);
+
+    for (const t of targets) {
+      const dist = Math.hypot(t.x - px, t.z - pz);
+      const inRange = dist < INTERACT_RANGE;
+
+      v.set(t.x, 30, t.z);
+      cam.copy(v).applyMatrix4(this.camera.matrixWorldInverse);
+      const behind = cam.z > -1;
+      v.project(this.camera);
+      let sx = (v.x * 0.5 + 0.5) * W;
+      let sy = (-v.y * 0.5 + 0.5) * H;
+      // Behind the camera the projection folds through the origin, so the
+      // marker would swing to the wrong side. Mirror it before clamping.
+      if (behind) {
+        sx = W - sx;
+        sy = H - sy;
+      }
+      const clamped =
+        behind || sx < mx || sx > W - mx || sy < mTop || sy > H - mBottom;
+      sx = Math.max(mx, Math.min(W - mx, sx));
+      sy = Math.max(mTop, Math.min(H - mBottom, sy));
+
+      // Anything already satisfied stays on screen but stops competing for
+      // attention: the materials are still worth taking, the gate is not.
+      const alpha = t.needed ? (inRange ? 1 : 0.8) : 0.3;
+      const color = inRange ? '#f0a860' : t.needed ? '#e9decb' : '#8d8577';
+      ctx.globalAlpha = alpha;
+      ctx.strokeStyle = color;
+      ctx.fillStyle = color;
+
+      const r = (clamped ? 9 : 7) * dpr;
+      ctx.beginPath();
+      if (clamped) {
+        // A triangle aimed out of the frame, toward the thing.
+        const ang = Math.atan2(sy - H / 2, sx - W / 2);
+        for (let i = 0; i < 3; i++) {
+          const a = ang + (i * 2 * Math.PI) / 3;
+          const fx = sx + Math.cos(a) * r;
+          const fy = sy + Math.sin(a) * r;
+          if (i === 0) ctx.moveTo(fx, fy);
+          else ctx.lineTo(fx, fy);
+        }
+        ctx.closePath();
+        ctx.fill();
+      } else {
+        // A diamond, so it never reads as part of the world.
+        ctx.moveTo(sx, sy - r);
+        ctx.lineTo(sx + r, sy);
+        ctx.lineTo(sx, sy + r);
+        ctx.lineTo(sx - r, sy);
+        ctx.closePath();
+        ctx.stroke();
+      }
+
+      // Channelling progress, as a ring closing around the marker.
+      if (t.progress > 0 && t.progress < 1) {
+        ctx.beginPath();
+        ctx.arc(sx, sy, r + 5 * dpr, -Math.PI / 2, -Math.PI / 2 + t.progress * Math.PI * 2);
+        ctx.lineWidth = 2.5 * dpr;
+        ctx.stroke();
+        ctx.lineWidth = Math.max(1, dpr);
+      }
+
+      ctx.font = `500 ${Math.round(10 * dpr)}px Inter, "Segoe UI", system-ui, sans-serif`;
+      const text = inRange ? `HOLD E — ${t.label}` : `${t.label} ${Math.round(dist)}m`;
+      const ty = sy + r + 14 * dpr;
+      // A centred label on a marker pinned to the left edge runs off the
+      // screen. Turn the text inward instead of letting it fall off.
+      const near = 90 * dpr;
+      ctx.textAlign = sx < near ? 'left' : sx > W - near ? 'right' : 'center';
+      const tx = sx < near ? sx - r : sx > W - near ? sx + r : sx;
+      ctx.lineWidth = 3 * dpr;
+      ctx.strokeStyle = 'rgba(8,6,5,0.85)';
+      ctx.strokeText(text, tx, ty);
+      ctx.fillStyle = color;
+      ctx.fillText(text, tx, ty);
+      ctx.lineWidth = Math.max(1, dpr);
+      ctx.textAlign = 'center';
+    }
+    ctx.globalAlpha = 1;
   }
 
   dispose(): void {
