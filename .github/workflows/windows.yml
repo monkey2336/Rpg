@@ -12,6 +12,10 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+# Needed only by the release step; the build itself reads nothing privileged.
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: windows-latest
@@ -50,3 +54,24 @@ jobs:
             release/*.zip
           if-no-files-found: error
           retention-days: 30
+
+      # On a version tag, attach the real Windows-built executables to a
+      # Release. An artifact needs a GitHub login, lives on the Actions page and
+      # arrives as one zip of every build variant; a Release is a plain download
+      # link. Uses the preinstalled gh CLI rather than a third-party action so
+      # there is one less moving part to trust.
+      - name: Publish release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          # @() so a single match is still an array; ForEach-Object on a bare
+          # match would otherwise hand a scalar to the splat below.
+          $files = @(Get-ChildItem release -Filter *.exe | ForEach-Object { $_.FullName })
+          if ($files.Count -eq 0) { throw 'no executables to publish' }
+          $ghArgs = @($env:GITHUB_REF_NAME) + $files + @(
+            '--title', "Cenotaph $env:GITHUB_REF_NAME",
+            '--notes-file', '.github/RELEASE_NOTES.md',
+            '--target', $env:GITHUB_SHA)
+          & gh release create @ghArgs
