@@ -45,7 +45,12 @@ const recoil = { pitch: 0, yaw: 0 };
 let firing = false;
 
 const MOUSE_SENS = 0.0024;
-const PITCH_MIN = -0.35;
+/**
+ * Screen pitch limits: positive looks down. Up-range is generous because the
+ * Warden is 150 units of plate standing close, and a rig that cannot look at
+ * a boss's head cannot shoot it.
+ */
+const PITCH_MIN = -0.8;
 const PITCH_MAX = 1.05;
 
 const keyMap: Record<string, string> = {
@@ -142,14 +147,32 @@ function pushInput(): void {
     fire: firing && pointerLocked,
     reload: held.has('reload'),
     interact: held.has('interact'),
-    // Third person: the shot goes where the camera looks. Pitch is negated
-    // because screen-down is a positive mouse delta but a negative world pitch.
-    aimYaw: camera.yaw + recoil.yaw,
-    aimPitch: -(camera.pitch + recoil.pitch),
+    // Third person: the shot goes where the *crosshair* is, which is not the
+    // same as where the camera's angles point — the camera sits behind and
+    // beside the gun. The rig works out the difference and `scene.aim` is the
+    // result, in world terms. Recoil is already in it: the rig is solved from
+    // the same pitch the view is drawn with.
+    aimYaw: scene.aim.yaw,
+    aimPitch: scene.aim.pitch,
     swapSlot: -1,
     summonBoss: held.has('summon'),
   });
 }
+
+/**
+ * A read-only handle for the shell smoke test.
+ *
+ * It asks one question nothing else can answer from outside: does the camera
+ * point where the gun is aimed? The build that shipped inverted sent a
+ * perfectly correct aim to the simulation and drew the camera swinging the
+ * other way, so every probe that looked at the simulation saw a healthy game.
+ * One global, read-only, and cheaper than shipping that again.
+ */
+(window as unknown as Record<string, unknown>).__cenotaphProbe = () => ({
+  aim: { yaw: scene.aim.yaw, pitch: scene.aim.pitch },
+  forward: scene.forward(),
+  ...scene.probe(),
+});
 
 /* --------------------------------- boot ---------------------------------- */
 
@@ -177,7 +200,9 @@ async function boot(): Promise<void> {
         if (ev.type !== 'shot') continue;
         // `amount` carries the archetype's recoil figure. Up and slightly off
         // to one side, so a burst walks rather than climbing a straight line.
-        recoil.pitch += ev.amount * 0.0042;
+        // Up, which is *negative* screen pitch. A gun that kicked the aim
+        // toward the floor would be a very strange gun.
+        recoil.pitch -= ev.amount * 0.0042;
         recoil.yaw += (Math.random() - 0.5) * ev.amount * 0.0026;
       }
     }
@@ -249,7 +274,6 @@ function frame(now: number): void {
   recoil.pitch *= recover;
   recoil.yaw *= recover;
 
-  pushInput();
   if (!snapshot) return;
 
   const deployed = snapshot.mode === 'zone';
@@ -272,6 +296,9 @@ function frame(now: number): void {
       snapshot.arena?.player.beamRamp ?? 0,
       snapshot.weapon?.damageType === 'solar' && catalog.activeArchetype === 'thurible',
     );
+    // After the render, not before it: the aim being sent is the one the rig
+    // just solved for the frame the player is looking at.
+    pushInput();
   } else if (now - lastScreenPaint > 500) {
     // Docked screens are static markup; repainting them at 60fps would be
     // pointless work. Half a second is plenty for a resource ticker.

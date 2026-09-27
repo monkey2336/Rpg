@@ -124,6 +124,14 @@ const checks = [
   ['the input probe actually saw a deployed view', report.input?.deployed === true && report.input?.viewWidth > 0 && report.input?.lockHintVisible === true],
   ['a click reaches the game view', report.input?.clickReachesView === true],
   ['nothing overlays the view and eats clicks', (report.input?.blockers ?? ['unknown']).length === 0],
+  // Mouse-look, measured in the simulation rather than in the renderer.
+  ['the mouse-look probe actually held the pointer', report.look?.locked === true],
+  ['mouse up raises the aim (not inverted)', report.look?.rose === true],
+  ['mouse down lowers it again', report.look?.fell === true],
+  ['mouse right turns right', report.look?.yawFollowedMouse === true],
+  ['the camera looks where the gun is aimed', report.look?.viewFollowsAim === true],
+  ['the camera stays above the sand at full up-look', report.look?.cameraStaysAboveGround === true],
+  ['the player stops blocking the crosshair up close', report.look?.playerGetsOutOfTheWay === true],
   ['boss encounter rendered', report.arena?.bossSpawned === true],
   ['all three bosses reachable and rendered', !!report.bosses && Object.values(report.bosses).every(Boolean) && Object.keys(report.bosses).length === 3],
   ['route runs while docked', !!report.route?.zoneId],
@@ -143,6 +151,16 @@ if (report.soundscapes) {
   const rows = b.ids.map((id) => `${id} rms ${report.soundscapes[id].rms} bright ${report.soundscapes[id].brightness}Hz`);
   console.log(`  score: ${rows.join('  |  ')}`);
   for (const bad of b.problems) console.log(`    PROBLEM  ${bad}`);
+}
+
+if (report.look) {
+  const l = report.look;
+  console.log(
+    `  look: pointer ${l.locked ? 'held' : 'NOT HELD'}, ` +
+      `aim pitch ${l.restPitch} → ${l.upPitch} (mouse up) → ${l.downPitch} (mouse down), ` +
+      `view y ${l.restViewY} → ${l.upViewY} → ${l.downViewY}; ` +
+      `at full up-look cam y ${l.steepUpCamY}, player alpha ${l.steepUpPlayerOpacity}`,
+  );
 }
 
 if (report.input) {

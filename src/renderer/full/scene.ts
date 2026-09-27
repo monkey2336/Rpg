@@ -14,6 +14,7 @@
 import * as THREE from '../vendor/three.module.js';
 import type { ArenaSnapshot } from '../../sim/snapshot.js';
 import { animateActor, buildHostile, buildPlayer, disposeActor, type Actor } from './actors.js';
+import { aimAngles, convergeDistance, solveRig, type RigTarget } from './rig.js';
 import { DAMAGE_COLOR, Fx } from './fx.js';
 
 const SHADOW_SIZE = 2048;
@@ -23,11 +24,28 @@ const SUN_DIR = new THREE.Vector3(-0.58, 0.235, -0.78).normalize();
 const RIM_DIR = new THREE.Vector3(0.68, 0.34, 0.65).normalize();
 
 /** Camera rig constants: an over-the-shoulder third person, pulled back for bosses. */
-const CAM_DIST = 132;
-const CAM_HEIGHT = 62;
-const CAM_SHOULDER = 26;
+const CAM_DIST = 108;
+/**
+ * Lift and shoulder step the camera off the aim ray for framing. They cost
+ * toe-in — the angle between the view and the barrel — and nothing else,
+ * because the shot converges on whatever the crosshair covers; at these
+ * values the toe-in is 2.2 degrees, which is invisible.
+ *
+ * The lift is what buys headroom. The muzzle sits 24 units off the sand, so
+ * a boom that drops as you look up runs out of floor almost immediately: at
+ * a 14-unit lift, a 20-degree up-look collapsed a 132-unit boom to 58 and the
+ * framing lurched every time the player raised the gun. Lifting the pivot
+ * flattens that — the boom now holds to within 5% out to 20 degrees.
+ */
+const CAM_LIFT = 34;
+const CAM_SHOULDER = 18;
 const CAM_BOSS_DIST = 430;
-const CAM_BOSS_HEIGHT = 205;
+const CAM_BOSS_LIFT = 120;
+/** Must match the simulation's muzzle height, `y + height * 0.72`. */
+const MUZZLE_HEIGHT = 0.72;
+/** The boom length over which the player fades out as the camera closes in. */
+const FADE_NEAR = 26;
+const FADE_FAR = 62;
 
 export interface CameraInput {
   yaw: number;
@@ -52,7 +70,21 @@ export class Scene3D {
   private beam: THREE.Mesh;
 
   private camDist = CAM_DIST;
-  private camHeight = CAM_HEIGHT;
+  private camLift = CAM_LIFT;
+  /** How far down the centre ray the shot converges; see `rig.ts`. */
+  private converge = 600;
+  /** Reused each frame so the aim cast allocates nothing. */
+  private readonly aimTargets: RigTarget[] = [];
+  private playerActor: Actor | null = null;
+  private playerOpacity = 1;
+  /**
+   * World aim implied by the rig — what the crosshair is actually covering.
+   *
+   * `main.ts` reads this and sends it to the simulation rather than sending
+   * the raw camera angles: the camera does not sit on the gun, so the two are
+   * not the same shot.
+   */
+  readonly aim = { yaw: 0, pitch: 0 };
   private camTarget = new THREE.Vector3();
   private shake = 0;
   private builtZone = '';
@@ -451,6 +483,26 @@ export class Scene3D {
     this.drawOverlay(snap);
   }
 
+  /**
+   * Where the camera is actually pointing, in world terms.
+   *
+   * Exists for the shell smoke test. The bug this exposes — a view that
+   * disagrees with the shot — is invisible to every other probe the harness
+   * has, because the simulation's aim was *correct* in the build that shipped
+   * inverted. Only the rendered camera was wrong, and nothing outside this
+   * class could see it.
+   */
+  forward(): { x: number; y: number; z: number } {
+    const v = new THREE.Vector3();
+    this.camera.getWorldDirection(v);
+    return { x: v.x, y: v.y, z: v.z };
+  }
+
+  /** Camera height and how visible the player is, for the same harness. */
+  probe(): { camY: number; playerOpacity: number } {
+    return { camY: this.camera.position.y, playerOpacity: this.playerOpacity };
+  }
+
   /* -------------------------------- actors ------------------------------- */
 
   private syncActors(snap: ArenaSnapshot, timeMs: number): void {
@@ -463,6 +515,7 @@ export class Scene3D {
         this.scene.add(actor);
         this.actors.set(e.id, actor);
       }
+      if (e.kind === 'player') this.playerActor = actor;
       actor.position.set(e.x, e.y, e.z);
       // A submerged burrower sinks rather than vanishing, so its return reads.
       if (e.defId === 'hollow-drone') actor.position.y = e.y + 4 + Math.sin(timeMs * 0.004 + e.id) * 2.5;
@@ -472,7 +525,8 @@ export class Scene3D {
       animateActor(actor, {
         gait: e.gait,
         yaw: e.yaw,
-        aimPitch: e.kind === 'player' ? -snap.player.aimPitch : undefined,
+        // World pitch, positive up — the barrel tilts the way the shot goes.
+        aimPitch: e.kind === 'player' ? snap.player.aimPitch : undefined,
         grounded: e.grounded,
         flash: e.flash,
         glow: e.weakPoints.length > 0 ? 1 : e.kind === 'boss' ? 0.15 : 0.1,
@@ -668,11 +722,21 @@ export class Scene3D {
   /* -------------------------------- camera ------------------------------- */
 
   /**
-   * Third-person rig with an over-the-shoulder offset.
+   * Third-person rig.
    *
-   * With a boss on the field it pulls back and rises to frame both fighters —
-   * a set-piece the player cannot see all of is not a set-piece. Both the
-   * distance and the height ease, so the pull-back reads as a beat.
+   * The boom lies *along* the aim ray — not on a separate orbit — so the
+   * camera and the gun cannot point in different directions. Lift and
+   * shoulder step the camera off that ray for framing; the shot then
+   * converges on whatever the centre ray actually meets, so what the
+   * crosshair covers is what the bullet hits. `rig.ts` holds the arithmetic
+   * and `test/rig.test.ts` holds it to that promise.
+   *
+   * With a boss on the field it pulls back to frame both fighters — a
+   * set-piece the player cannot see all of is not a set-piece. It pulls back
+   * *along the ray* and no longer biases where the camera points: a rig that
+   * looks somewhere other than where the gun is aimed lies to the reticle,
+   * and a boss fight is the worst moment to start lying. Distance and lift
+   * both ease, so the pull-back still reads as a beat.
    */
   private updateCamera(
     player: ArenaSnapshot['entities'][number],
@@ -682,47 +746,98 @@ export class Scene3D {
     dt: number,
   ): void {
     let wantDist = CAM_DIST;
-    let wantHeight = CAM_HEIGHT;
-    const focus = new THREE.Vector3(player.x, player.y + player.height * 0.8, player.z);
+    let wantLift = CAM_LIFT;
 
     if (boss) {
       const gap = Math.hypot(boss.x - player.x, boss.z - player.z);
-      // The Warden is 150 units tall before its stacks and stands close. The
-      // rig has to back off hard or the set-piece is just a wall of plate.
+      // The Warden is 150 units tall before its stacks and stands close.
       wantDist = Math.min(CAM_BOSS_DIST, CAM_DIST + gap * 0.55 + boss.height * 1.15);
-      wantHeight = CAM_BOSS_HEIGHT;
-      // Bias the framing toward the boss without losing the player.
-      focus.x += (boss.x - player.x) * 0.3;
-      focus.z += (boss.z - player.z) * 0.3;
-      focus.y += boss.height * 0.4;
+      wantLift = CAM_BOSS_LIFT;
     }
 
     const ease = Math.min(1, 0.055 * dt);
     this.camDist += (wantDist - this.camDist) * ease;
-    this.camHeight += (wantHeight - this.camHeight) * ease;
-    this.camTarget.lerp(focus, Math.min(1, 0.22 * dt));
+    this.camLift += (wantLift - this.camLift) * ease;
 
-    const cp = Math.cos(cam.pitch);
-    const offset = new THREE.Vector3(
-      -Math.cos(cam.yaw) * cp * this.camDist,
-      this.camHeight + Math.sin(-cam.pitch) * this.camDist,
-      -Math.sin(cam.yaw) * cp * this.camDist,
-    );
-    // Shoulder offset, perpendicular to the view.
-    const right = new THREE.Vector3(-Math.sin(cam.yaw), 0, Math.cos(cam.yaw));
-    offset.addScaledVector(right, CAM_SHOULDER * (boss ? 0.2 : 1));
+    const rig = solveRig({
+      yaw: cam.yaw,
+      pitch: cam.pitch,
+      dist: this.camDist,
+      lift: this.camLift,
+      // A long boom already frames the fight; a wide shoulder on top of it is
+      // just parallax you pay for at every range.
+      shoulder: CAM_SHOULDER * (boss ? 0.45 : 1),
+      muzzle: { x: player.x, y: player.y + player.height * MUZZLE_HEIGHT, z: player.z },
+    });
 
-    this.shake += (snap.shake - this.shake) * 0.4;
-    const s = this.shake;
-    this.camera.position.copy(this.camTarget).add(offset);
-    if (s > 0.05) {
-      this.camera.position.x += (Math.random() - 0.5) * s * 1.6;
-      this.camera.position.y += (Math.random() - 0.5) * s * 1.2;
-      this.camera.position.z += (Math.random() - 0.5) * s * 1.6;
+    this.aimTargets.length = 0;
+    for (const e of snap.entities) {
+      if (e.kind === 'player') continue;
+      this.aimTargets.push({ x: e.x, y: e.y, z: e.z, radius: e.radius, height: e.height });
     }
-    // Never let the camera go under the sand.
-    this.camera.position.y = Math.max(14, this.camera.position.y);
+    this.converge = convergeDistance(rig, this.aimTargets, snap.arenaRadius);
+    const aim = aimAngles(rig, this.converge);
+    this.aim.yaw = aim.yaw;
+    this.aim.pitch = aim.pitch;
+
+    // The look target sits on the centre ray, so `lookAt` reproduces the
+    // rig's forward vector exactly — the one `convergeDistance` cast along.
+    this.camTarget.set(
+      rig.pos.x + rig.forward.x * this.converge,
+      rig.pos.y + rig.forward.y * this.converge,
+      rig.pos.z + rig.forward.z * this.converge,
+    );
+    this.camera.position.set(rig.pos.x, rig.pos.y, rig.pos.z);
+
+    // Shake translates the whole rig rather than rotating it, so a hit that
+    // rattles the camera never rattles the aim.
+    this.shake += (snap.shake - this.shake) * 0.4;
+    const sh = this.shake;
+    if (sh > 0.05) {
+      const jx = (Math.random() - 0.5) * sh * 1.6;
+      const jy = (Math.random() - 0.5) * sh * 1.2;
+      const jz = (Math.random() - 0.5) * sh * 1.6;
+      this.camera.position.x += jx;
+      this.camera.position.y += jy;
+      this.camera.position.z += jz;
+      this.camTarget.x += jx;
+      this.camTarget.y += jy;
+      this.camTarget.z += jz;
+    }
+
+    // The rig already keeps the camera clear of the sand by shortening the
+    // boom, which is the only way to do it without tilting the view off the
+    // shot. This is a floor under the *shake*, nothing more.
+    this.camera.position.y = Math.max(4, this.camera.position.y);
     this.camera.lookAt(this.camTarget);
+
+    // Looking steeply up pulls the boom in to keep the camera out of the
+    // sand, and a boom that short puts the player's own shoulder across the
+    // crosshair. Fade them out rather than let them block the shot; a
+    // silhouette you cannot see past is worse than no silhouette.
+    const boom = Math.hypot(
+      this.camera.position.x - rig.muzzle.x,
+      this.camera.position.y - rig.muzzle.y,
+      this.camera.position.z - rig.muzzle.z,
+    );
+    this.setPlayerOpacity(Math.min(1, Math.max(0, (boom - FADE_NEAR) / (FADE_FAR - FADE_NEAR))));
+  }
+
+  /** Dissolves the player actor as the camera closes on it. */
+  private setPlayerOpacity(opacity: number): void {
+    if (!this.playerActor || opacity === this.playerOpacity) return;
+    this.playerOpacity = opacity;
+    this.playerActor.visible = opacity > 0.02;
+    this.playerActor.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      for (const m of Array.isArray(mesh.material) ? mesh.material : [mesh.material]) {
+        const mat = m as THREE.Material;
+        mat.transparent = opacity < 0.999;
+        mat.opacity = opacity;
+        mat.depthWrite = opacity > 0.9;
+      }
+    });
   }
 
   /* -------------------------------- events ------------------------------- */

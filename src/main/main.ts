@@ -189,6 +189,93 @@ async function smokeTest(): Promise<void> {
       };
     })()`);
 
+    /*
+     * Mouse-look, end to end: DOM event -> rig -> IPC -> simulation state.
+     *
+     * The rig's arithmetic is pinned by test/rig.test.ts. What that cannot
+     * see is the wiring — whether the renderer sends the rig's aim or the raw
+     * camera angles, and whether a sign survives the trip. Both of those
+     * shipped wrong, so both are checked here against the sim's own numbers
+     * rather than against anything the renderer reports about itself.
+     *
+     * `userGesture` is what lets requestPointerLock succeed; without it the
+     * mousemove handler bails on its own first line and the probe would
+     * measure nothing while looking like it passed.
+     */
+    const round3 = (n: number) => Math.round(n * 1000) / 1000;
+    const readAim = () => ({
+      yaw: host.session.arena?.player.aimYaw ?? 0,
+      pitch: host.session.arena?.player.aimPitch ?? 0,
+    });
+    const nudge = async (movementX: number, movementY: number) => {
+      await windows.full.webContents.executeJavaScript(
+        `window.dispatchEvent(new MouseEvent('mousemove', { movementX: ${movementX}, movementY: ${movementY} }))`,
+      );
+      await wait(220);
+      // The simulation's aim and the camera's actual heading, together. Either
+      // one alone looks healthy in a build where they disagree.
+      const view = (await windows.full.webContents.executeJavaScript(
+        `window.__cenotaphProbe()`,
+      )) as { forward: { y: number }; camY: number; playerOpacity: number };
+      return { ...readAim(), viewY: view.forward.y, camY: view.camY, playerOpacity: view.playerOpacity };
+    };
+
+    // Chromium refuses pointer lock on an unfocused document and imposes a
+    // short cooldown after a previous exit, so one attempt is a coin flip and
+    // a coin flip is worse than no check at all. Focus the window and retry.
+    windows.full.focus();
+    let locked = false;
+    for (let attempt = 0; attempt < 6 && !locked; attempt++) {
+      locked = (await windows.full.webContents.executeJavaScript(
+        `(async () => {
+          const view = document.getElementById('view');
+          if (document.pointerLockElement === view) return true;
+          view.click();
+          for (let i = 0; i < 12; i++) {
+            if (document.pointerLockElement === view) return true;
+            await new Promise((r) => setTimeout(r, 50));
+          }
+          return false;
+        })()`,
+        true,
+      )) as boolean;
+      if (!locked) await wait(300);
+    }
+    // Mouse up is a negative movementY. The aim must rise, and so must the view.
+    const rest = await nudge(0, 0);
+    const up = await nudge(0, -160);
+    const down = await nudge(0, 320);
+    const right = await nudge(200, 0);
+    // All the way to the up-stop, where the boom has to shorten or the camera
+    // ends up under the sand.
+    const steepUp = await nudge(0, -900);
+    // Put the camera back where it started. Every capture after this point is
+    // meant to show the game as it is played, not as the probe left it.
+    await nudge(0, 740);
+    await windows.full.webContents.executeJavaScript(`document.exitPointerLock()`);
+    report.look = {
+      locked,
+      restPitch: round3(rest.pitch),
+      upPitch: round3(up.pitch),
+      downPitch: round3(down.pitch),
+      restViewY: round3(rest.viewY),
+      upViewY: round3(up.viewY),
+      downViewY: round3(down.viewY),
+      rose: up.pitch > rest.pitch + 0.02,
+      fell: down.pitch < up.pitch - 0.02,
+      yawFollowedMouse: right.yaw > down.yaw + 0.02,
+      // The assertion the shipped build would have failed: the camera moved
+      // the opposite way to the gun at every pitch but its resting one.
+      viewFollowsAim:
+        up.viewY > rest.viewY + 0.02 && down.viewY < up.viewY - 0.02,
+      steepUpCamY: round3(steepUp.camY),
+      steepUpPlayerOpacity: round3(steepUp.playerOpacity),
+      // The boom shortens instead of burying the camera, and the player
+      // dissolves rather than standing in front of the crosshair.
+      cameraStaysAboveGround: steepUp.camY > 0,
+      playerGetsOutOfTheWay: steepUp.playerOpacity < 0.9,
+    };
+
     // The prompt is correct behaviour but would sit over every capture, so the
     // harness dismisses it only after the check above has run against it.
     await windows.full.webContents.executeJavaScript(

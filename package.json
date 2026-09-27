@@ -1,7 +1,7 @@
 {
   "name": "cenotaph",
   "productName": "Cenotaph",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "A dual-mode idle RPG: crew a salvage vessel across sun-scorched worlds. Windows-first.",
   "private": true,
   "type": "module",

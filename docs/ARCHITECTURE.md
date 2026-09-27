@@ -305,6 +305,53 @@ the cost of the world holding still on a connect, and it is the right trade.
 
 ---
 
+## 5d-ii. The camera rig, and why it has its own module
+
+`src/renderer/full/rig.ts` is pure arithmetic — no Three.js, no DOM, no clock —
+and it holds one contract:
+
+> **Screen centre is a point on the bullet's ray.**
+
+Everything else about the rig follows from that. The boom lies *along* the aim
+ray rather than on a separate orbit, so the camera and the gun cannot point in
+different directions. Lift and shoulder step the camera off that ray for
+framing, and the shot then converges on whatever the centre ray actually meets,
+so what the crosshair covers is what the bullet hits. Looking up shortens the
+boom instead of sinking the camera into the sand, because shortening keeps the
+camera on the ray where clamping its height would tilt the view off the shot.
+
+Two conventions, and they are the whole of the danger here:
+
+| | positive means |
+|---|---|
+| **screen pitch** (`camera.pitch`, `RigParams.pitch`) | looking **down** — a downward mouse move is a positive `movementY` |
+| **world pitch** (`aimPitch` everywhere in `src/sim`) | **up** |
+
+They are negations of each other and that negation happens in exactly one
+function, `aimDirection`. Anywhere else is a bug — and it was, three times at
+once, in 0.1.0.
+
+**Why it is a separate module.** Because the fault it guards against is
+invisible to inspection. The shipped rig used `height + sin(-pitch) * dist`,
+which swings the camera down as the aim swings up; the two agreed at screen
+pitch 0.22, the value the camera rests at before the mouse is touched. Every
+screenshot looked correct. The game inverted itself the moment anyone aimed.
+Pulling the arithmetic out of the scene made it something a test can sweep, and
+`test/rig.test.ts` sweeps the whole reachable pitch range asserting that the
+view and the aim move together and that a body under the reticle is a body the
+shot arrives inside. One of its cases reconstructs the old formula and fails if
+it is ever wildly wrong *in the opposite direction*, so the suite cannot quietly
+stop measuring the thing it exists for.
+
+The shell smoke test carries the end-to-end half, because a unit test cannot
+see wiring. It takes pointer lock on the live window, dispatches real
+`mousemove` events, and compares the simulation's `aimPitch` against the
+camera's actual world heading read back out of Three.js. Checking only the
+simulation would not have caught 0.1.0 at all: the aim it received was
+*correct*. Only the rendered camera was wrong.
+
+---
+
 ## 5e. The boss pipeline
 
 A boss is data. `BossDef` carries its geometry, defences, weak points and phases;
