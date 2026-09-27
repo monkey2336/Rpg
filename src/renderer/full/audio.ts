@@ -38,6 +38,8 @@ export type CueName =
   | 'gate'
   | 'mined'
   | 'scanned'
+  | 'pickup'
+  | 'revive'
   | 'boss-down'
   | 'player-down';
 
@@ -237,6 +239,17 @@ export const CUES: Record<CueName, Cue> = {
   mined: (c, d, t, o) => {
     noise(c, d, t, { dur: 0.16, gain: 0.2 * o.gain, from: 700 * o.vary, to: 220, q: 2.2 });
     tone(c, d, t, { type: 'triangle', from: 330, to: 440, dur: 0.14, gain: 0.1 * o.gain });
+  },
+  // Loot has to sound like loot. A rising pair of thirds, short and bright,
+  // so a pickup cuts through a firefight without competing with the kill cue
+  // it usually follows by half a second.
+  pickup: (c, d, t, o) => {
+    tone(c, d, t, { type: 'triangle', from: 740, to: 1180, dur: 0.1, gain: 0.13 * o.gain, attack: 0.005 });
+    tone(c, d, t, { type: 'sine', from: 1480, dur: 0.16, gain: 0.07 * o.gain, delay: 0.05, attack: 0.005 });
+  },
+  revive: (c, d, t, o) => {
+    tone(c, d, t, { type: 'sine', from: 110, to: 220, dur: 0.7, gain: 0.3 * o.gain, attack: 0.05 });
+    noise(c, d, t, { dur: 0.5, gain: 0.1 * o.gain, from: 300 * o.vary, to: 900, q: 1.2 });
   },
   scanned: (c, d, t, o) => {
     tone(c, d, t, { type: 'sine', from: 660, to: 990, dur: 0.3, gain: 0.12 * o.gain, attack: 0.02 });
@@ -464,6 +477,12 @@ export class AudioEngine {
           break;
         case 'weak':
           this.play('impact-weak');
+          break;
+        case 'pickup':
+          this.play('pickup');
+          break;
+        case 'revive':
+          this.play('revive');
           break;
         case 'warded':
           this.play('warded', { gain: 0.6 });

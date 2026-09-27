@@ -16,6 +16,8 @@ import { derive, syncPlayerDefences, type Derived } from './derive.js';
 import {
   createArena,
   playerEntity,
+  revivePlayer,
+  spawnDrop,
   stepArena,
   summonBoss,
   type ArenaEvent,
@@ -50,6 +52,14 @@ export interface Session {
   plan: CyclePlan | null;
   /** Drained by presentation each frame. */
   feed: string[];
+  /**
+   * Names of weapons already banked but not yet walked over, keyed by uid.
+   *
+   * Runtime only, and deliberately so: the item itself is in the hold the
+   * instant the kill lands, so nothing here is ownership. It is the text of a
+   * notice waiting for the player to reach the thing it describes.
+   */
+  pendingDropNames: Map<number, string>;
 }
 
 export interface TickResult {
@@ -59,11 +69,11 @@ export interface TickResult {
 }
 
 export function newSession(seed: number, nowMs: number): Session {
-  return { state: createNewGame(seed, nowMs), arena: null, mode: 'ship', plan: null, feed: [] };
+  return { state: createNewGame(seed, nowMs), arena: null, mode: 'ship', plan: null, feed: [], pendingDropNames: new Map() };
 }
 
 export function sessionFromState(state: GameState): Session {
-  return { state, arena: null, mode: 'ship', plan: null, feed: [] };
+  return { state, arena: null, mode: 'ship', plan: null, feed: [], pendingDropNames: new Map() };
 }
 
 /** Call after anything that changes gear, tech, or ship ranks. */
@@ -108,6 +118,9 @@ export function landInZoneChecked(session: Session, zoneId: string): LandResult 
   p.health = p.healthMax;
   p.shield = p.shieldMax;
   p.armor = p.armorMax;
+  // Anything still on the sand of the last zone is already owned; say so
+  // before the arena that was holding the markers is thrown away.
+  flushPendingDrops(session);
   session.arena = createArena(zoneId, (session.state.seed ^ (session.state.tick * 2654435761)) >>> 0, p, d.scanSpeed);
   session.state.currentZone = zoneId;
   session.mode = 'zone';
@@ -116,8 +129,21 @@ export function landInZoneChecked(session: Session, zoneId: string): LandResult 
 }
 
 export function returnToShip(session: Session): void {
+  flushPendingDrops(session);
   session.arena = null;
   session.mode = 'ship';
+}
+
+/**
+ * Stands a downed player back up in the zone they are already in.
+ *
+ * Returns false when there is nothing to revive, so the caller can say why.
+ */
+export function reviveInZone(session: Session): boolean {
+  if (!session.arena) return false;
+  const d = derive(session.state);
+  syncPlayerDefences(session.state, d);
+  return revivePlayer(session.arena, session.state.player.defences);
 }
 
 export function requestBoss(session: Session): boolean {
@@ -241,7 +267,9 @@ function applyArenaEvents(session: Session, events: ArenaEvent[], d: Derived, ou
         // Active play rolls the full rarity table. Idle cannot; that gap is the
         // reason to show up in person.
         const dropChance = def.kind === 'elite' ? 0.65 : 0.11;
-        if (nextFloat(state.rng) < dropChance) rollDrop(session, d, zone.recommendedPower, out);
+        if (nextFloat(state.rng) < dropChance) {
+          rollDrop(session, d, zone.recommendedPower, out, { x: ev.x, y: ev.y, z: ev.z });
+        }
         break;
       }
       case 'mined': {
@@ -258,9 +286,26 @@ function applyArenaEvents(session: Session, events: ArenaEvent[], d: Derived, ou
         onBossDown(session, d, out);
         break;
       }
+      case 'pickup': {
+        // The item was banked when the kill landed; this is the moment the
+        // player actually sees it. Announcing here rather than at the kill
+        // means the notice arrives with the pickup, not four seconds before.
+        const name = session.pendingDropNames.get(ev.id);
+        if (name !== undefined) {
+          session.pendingDropNames.delete(ev.id);
+          out.notices.push(`Recovered: ${name}`);
+        }
+        break;
+      }
       case 'player-down': {
         state.stats.deaths += 1;
-        out.notices.push('Downed. Nothing banked is lost — the run is.');
+        out.notices.push('Downed. The approach holds — get up and keep going.');
+        break;
+      }
+      case 'revive': {
+        out.notices.push(
+          arena.gateMet ? 'On your feet. The beacon is still lit.' : 'On your feet.',
+        );
         break;
       }
       case 'gate': {
@@ -276,7 +321,22 @@ function applyArenaEvents(session: Session, events: ArenaEvent[], d: Derived, ou
   state.player.defences = p.def;
 }
 
-function rollDrop(session: Session, d: Derived, ilvl: number, out: TickResult): void {
+/**
+ * Rolls a weapon from a kill and banks it immediately.
+ *
+ * `at` makes the drop visible: the arena throws a marker onto the sand that
+ * flies to the player when they come near, and the "Recovered" notice waits
+ * for that moment instead of firing from across the terrace. The item is the
+ * player's either way, from the instant the kill lands — the marker is how
+ * they see it, not how they earn it.
+ */
+function rollDrop(
+  session: Session,
+  d: Derived,
+  ilvl: number,
+  out: TickResult,
+  at?: { x: number; y: number; z: number },
+): void {
   const { state } = session;
   const item = rollWeapon(streamSource(state.rng), {
     ilvl,
@@ -292,7 +352,29 @@ function rollDrop(session: Session, d: Derived, ilvl: number, out: TickResult): 
     return;
   }
   state.inventory.items.push(item);
+  if (at && session.arena) {
+    session.pendingDropNames.set(item.uid, item.name);
+    spawnDrop(session.arena, item.uid, item.rarity, at.x, at.y, at.z);
+    return;
+  }
   out.notices.push(`Recovered: ${item.name}`);
+}
+
+/**
+ * Names anything still lying on the sand when a run ends.
+ *
+ * Leaving a zone never costs loot. The markers are feedback, and feedback the
+ * player walked past still has to be delivered.
+ */
+function flushPendingDrops(session: Session): void {
+  if (session.pendingDropNames.size === 0) return;
+  const names = [...session.pendingDropNames.values()];
+  session.pendingDropNames.clear();
+  session.feed.push(
+    names.length === 1
+      ? `Recovered: ${names[0]}`
+      : `Recovered ${names.length} weapons left on the ground.`,
+  );
 }
 
 function onBossDown(session: Session, d: Derived, out: TickResult): void {
@@ -303,6 +385,7 @@ function onBossDown(session: Session, d: Derived, out: TickResult): void {
   const boss = getBoss(zone.bossId);
   const progress = state.zones[arena.zoneId]!;
 
+  flushPendingDrops(session);
   progress.bossKills += 1;
   progress.cleared = true;
   state.stats.bossKills += 1;

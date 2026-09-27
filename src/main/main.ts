@@ -18,10 +18,11 @@ import {
   type AppMode,
   type Windows,
 } from './windows.js';
+import { NEUTRAL_INPUT, spawnDrop } from '../sim/arena.js';
 import { BOSS_DEFS, PLANETS, ZONES } from '../sim/content/index.js';
 import { DAMAGE_COLOR, DAMAGE_LABEL } from '../sim/content/damage.js';
 import { MATERIAL_NAMES, RARITY_DEFS } from '../sim/content/items.js';
-import { WEAPON_ARCHETYPES } from '../sim/content/weapons.js';
+import { archetypeVerb, WEAPON_ARCHETYPES } from '../sim/content/weapons.js';
 
 let host: SimHost;
 let windows: Windows;
@@ -35,6 +36,10 @@ function contentManifest(): Record<string, unknown> {
     zones: ZONES,
     bosses: BOSS_DEFS.map((b) => ({ id: b.id, name: b.name, epithet: b.epithet, phases: b.phases })),
     archetypes: WEAPON_ARCHETYPES,
+    // The one mechanic each archetype owns. The loadout screen exists to make
+    // a three-weapon choice legible, and "1200 dps" does not do that — which
+    // of the three answers armour, which answers a crowd, which answers range.
+    verbs: Object.fromEntries(WEAPON_ARCHETYPES.map((a) => [a.id, archetypeVerb(a)])),
     rarities: RARITY_DEFS,
     damageLabels: DAMAGE_LABEL,
     damageColors: DAMAGE_COLOR,
@@ -283,7 +288,9 @@ async function smokeTest(): Promise<void> {
     );
     const { botInput } = await import('../headless/bot.js');
     let botTick = 0;
+    let botPaused = false;
     const driving = setInterval(() => {
+      if (botPaused) return;
       host.setInput(botInput(host.session, botTick++) as unknown as Record<string, unknown>);
     }, 25);
 
@@ -295,6 +302,63 @@ async function smokeTest(): Promise<void> {
     // Force the gate rather than waiting for the bot to grind it. This harness
     // exists to verify that the shell renders the set-piece; that the loop is
     // *completable* is proven by the headless soak, which does grind it.
+    /*
+     * Loot on the ground, one of each rarity, laid out in front of the player.
+     *
+     * The bot only reaches a couple of kills before the boss is forced, and at
+     * an eleven percent drop rate that is usually no drops at all — so the
+     * feature would ship unlooked-at unless the harness puts some there. The
+     * capture is the point; the assertion below only proves they reached the
+     * snapshot the renderer draws from.
+     */
+    {
+      const a = host.session.arena;
+      if (a) {
+        // Hold the bot still and the aim fixed, or it turns away between the
+        // spawn and the shutter and the capture shows an empty stretch of sand.
+        botPaused = true;
+        host.setInput({ ...NEUTRAL_INPUT } as unknown as Record<string, unknown>);
+        await wait(500);
+
+        // The renderer owns the camera, not the simulation, so "in front of
+        // the player" has to be asked of the renderer — aiming the sim put
+        // five drops behind the shot and produced a photograph of sand. Ask
+        // for the camera itself and walk its centre ray down to the ground:
+        // that lands them under the crosshair rather than near it.
+        const view = (await windows.full.webContents.executeJavaScript(
+          `window.__cenotaphProbe()`,
+        )) as { cam: { x: number; y: number; z: number }; forward: { x: number; y: number; z: number } };
+        const f = view.forward;
+        const flat = Math.hypot(f.x, f.z) || 1;
+        const fx = f.x / flat;
+        const fz = f.z / flat;
+        // Perpendicular to the view, so the fan spreads across the frame.
+        const rx = -fz;
+        const rz = fx;
+        const p = a.entities.find((e) => e.kind === 'player');
+        // Beyond the magnet radius, or they fly to the player and the shutter
+        // catches an empty stretch of sand — which it did.
+        const cx = (p?.x ?? 0) + fx * 205;
+        const cz = (p?.z ?? 0) + fz * 205;
+
+        const rarities = ['common', 'refined', 'marked', 'relic', 'sovereign'];
+        rarities.forEach((rarity, i) => {
+          const lateral = (i - 2) * 38;
+          spawnDrop(a, 9000 + i, rarity, cx + rx * lateral, 40, cz + rz * lateral);
+        });
+        await wait(1200);
+        report.drops = {
+          spawned: rarities.length,
+          inSnapshot: (host.fullSnapshot().arena?.drops ?? []).length,
+        };
+        const dropShot = await windows.full.webContents.capturePage();
+        await writeFile(`${outDir}/drops.png`, dropShot.toPNG());
+        // Leave the field as it was found.
+        a.drops.length = 0;
+        botPaused = false;
+      }
+    }
+
     const arena = host.session.arena;
     if (arena) {
       arena.kills = 999;
@@ -368,7 +432,8 @@ async function smokeTest(): Promise<void> {
 
     // Walk the docked screens. Each pulls a different projection out of the
     // catalog, so a capture of each is the cheapest real check that they bind.
-    for (const screen of ['hold', 'tech', 'ship', 'codex', 'settings']) {
+    const screens = ['loadout', 'hold', 'tech', 'ship', 'codex', 'settings'];
+    for (const screen of screens) {
       await windows.full.webContents.executeJavaScript(
         `document.querySelector('#nav button[data-screen="${screen}"]').click()`,
       );
@@ -376,7 +441,20 @@ async function smokeTest(): Promise<void> {
       const shot = await windows.full.webContents.capturePage();
       await writeFile(`${outDir}/screen-${screen}.png`, shot.toPNG());
     }
-    report.screensCaptured = 5;
+    report.screensCaptured = screens.length;
+    // A screen that throws while rendering leaves an empty panel behind, and
+    // a capture cannot tell the difference. Ask the DOM instead.
+    report.screenContent = await windows.full.webContents.executeJavaScript(
+      `(() => {
+        const out = {};
+        for (const s of ${JSON.stringify(screens)}) {
+          document.querySelector('#nav button[data-screen="' + s + '"]').click();
+          const el = document.querySelector('#screens');
+          out[s] = (el?.textContent ?? '').trim().length;
+        }
+        return out;
+      })()`,
+    );
 
     // Audio cannot be listened to in a headless build, so it is measured
     // instead: every cue is rendered into an OfflineAudioContext and checked

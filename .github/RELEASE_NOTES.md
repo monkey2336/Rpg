@@ -6,8 +6,8 @@ corner of your desktop and let it run itself.
 
 | | |
 |---|---|
-| **`Cenotaph-0.1.1-portable.exe`** | **Start here.** Double-click and it runs. No install. |
-| `Cenotaph-0.1.1-x64.exe` | Installer — Start Menu entry, desktop shortcut, choose your own folder. |
+| **`Cenotaph-0.1.2-portable.exe`** | **Start here.** Double-click and it runs. No install. |
+| `Cenotaph-0.1.2-x64.exe` | Installer — Start Menu entry, desktop shortcut, choose your own folder. |
 
 **Windows will block it on first run.** The build is unsigned — signing needs a
 paid certificate tied to a real publisher — so SmartScreen shows *"Windows
@@ -18,6 +18,35 @@ reassurance here is that every line of this one is in the repo and
 
 It uses Electron's default icon. A real one is an art task, and a placeholder
 would be worse than none.
+
+## New in 0.1.2
+
+**Dying no longer throws away the run.** Landing again rebuilt the whole zone:
+kills, deposits and scans back to zero, and the crossing charged its fuel a
+second time. Dying at 20 of 24 kills meant redoing the entire approach, which
+is why clearing an area could feel impossible. The button now says **Get up**,
+and it means it — you stand up where you fell with everything you had.
+
+The exception is a boss. If it kills you it withdraws and the gate stays open,
+so you replay the fight rather than the ninety seconds that unlocked it. A
+set-piece you stumble into half-dead is one nobody can learn.
+
+**Loot is on the ground now.** Killing something has always had a chance to
+roll you a weapon; it just appeared silently in the Hold. It now falls where
+the body did, glows in its rarity's colour, and flies to you when you get
+close, with the sound and the name arriving as you pick it up. Nothing changed
+about ownership — the weapon is yours from the instant the kill lands, and
+anything still on the sand when a run ends comes home with you. There is no
+timer and nothing to scramble for.
+
+**A Loadout screen.** The Hold is a warehouse — every weapon you own, sortable
+and scrappable — and its Equip button silently dropped things into whichever
+slot happened to be active. You could not see your three side by side and you
+could not choose which slot anything went to. Loadout gives each slot a card:
+what is in it, what it *does* (stagger, ramp, lob, chain, falloff, charge,
+homing, linger), and a picker that targets that slot and no other. It also
+tells you when all three of your weapons deal the same damage type, which is
+the kind of gap a column of DPS numbers hides.
 
 ## Fixed in 0.1.1
 

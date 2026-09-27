@@ -132,10 +132,15 @@ const checks = [
   ['the camera looks where the gun is aimed', report.look?.viewFollowsAim === true],
   ['the camera stays above the sand at full up-look', report.look?.cameraStaysAboveGround === true],
   ['the player stops blocking the crosshair up close', report.look?.playerGetsOutOfTheWay === true],
+  ['loot on the ground reaches the renderer', report.drops?.inSnapshot === report.drops?.spawned && report.drops?.spawned > 0],
   ['boss encounter rendered', report.arena?.bossSpawned === true],
   ['all three bosses reachable and rendered', !!report.bosses && Object.values(report.bosses).every(Boolean) && Object.keys(report.bosses).length === 3],
   ['route runs while docked', !!report.route?.zoneId],
-  ['docked screens render', report.screensCaptured === 5],
+  ['docked screens render', report.screensCaptured === 6],
+  ['every docked screen has content, including the new Loadout',
+    !!report.screenContent &&
+      Object.keys(report.screenContent).length === 6 &&
+      Object.values(report.screenContent).every((n) => n > 80)],
   ['every audio cue is audible', audioOk(report.audio).ok],
   ['each place has its own soundscape', bedsOk(report.soundscapes).ok],
 ];

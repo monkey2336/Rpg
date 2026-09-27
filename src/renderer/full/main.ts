@@ -219,7 +219,13 @@ async function boot(): Promise<void> {
       void refresh();
     });
   });
-  $('#ov-again').addEventListener('click', () => void command('land', { zoneId: snapshot?.arena?.zoneId }));
+  // Downed keeps the run; cleared starts a fresh one. Landing again after a
+  // death threw away every kill, deposit and scan and charged the crossing a
+  // second time, which is a tax on nearly making it rather than difficulty.
+  $('#ov-again').addEventListener('click', () => {
+    if (snapshot?.arena?.outcome === 'down') return void command('revive');
+    return void command('land', { zoneId: snapshot?.arena?.zoneId });
+  });
   $('#ov-ship').addEventListener('click', () => void command('return-to-ship'));
 
   snapshot = (await api.snapshot('full')) as FullSnapshot;
@@ -392,10 +398,13 @@ function paintHud(s: FullSnapshot): void {
   if (done) {
     if (document.pointerLockElement) document.exitPointerLock();
     $('#ov-title').textContent = a.outcome === 'cleared' ? 'Zone cleared' : 'Downed';
+    $('#ov-again').textContent = a.outcome === 'cleared' ? 'Land again' : 'Get up';
     $('#ov-text').textContent =
       a.outcome === 'cleared'
         ? 'The terrace is quiet. The zone is now available as an idle route, and the ship has recorded the codex entry.'
-        : 'Everything you banked is still aboard. The run is what you lost.';
+        : a.boss
+          ? 'The approach holds — kills, deposits and scans all stand. The boss withdraws, because a set-piece you enter half-dead is one nobody can learn. Call it again when you are ready.'
+          : `The approach holds: ${a.gate.kills}/${a.gate.killsNeeded} cleared, ${a.gate.deposits}/${a.gate.depositsNeeded} mined, ${a.gate.scans}/${a.gate.scansNeeded} scanned. Get up and keep going.`;
   }
 }
 

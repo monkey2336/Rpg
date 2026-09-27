@@ -130,6 +130,8 @@ export interface ArenaSnapshot {
   telegraphs: { x: number; z: number; r: number; shape: string; type: string; progress: number; yaw: number }[];
   /** Burning ground. `life` runs 1 to 0 as the patch burns out. */
   hazards: { x: number; z: number; radius: number; type: string; life: number }[];
+  /** Loot on the sand. `rarity` drives the colour; nothing else is needed. */
+  drops: { x: number; y: number; z: number; rarity: string; age: number }[];
   deposits: { x: number; z: number; progress: number; depleted: boolean }[];
   scans: { x: number; z: number; progress: number; done: boolean }[];
   player: {
@@ -362,6 +364,7 @@ function buildArenaSnapshot(a: ArenaState): ArenaSnapshot {
       type: h.damageType,
       life: h.ticksLeft / Math.max(1, h.totalTicks),
     })),
+    drops: a.drops.map((dp) => ({ x: dp.x, y: dp.y, z: dp.z, rarity: dp.rarity, age: dp.age })),
     deposits: a.deposits.map((dp) => ({ x: dp.x, z: dp.z, progress: dp.progress / dp.required, depleted: dp.depleted })),
     scans: a.scans.map((s) => ({ x: s.x, z: s.z, progress: s.progress / s.required, done: s.done })),
     player: {

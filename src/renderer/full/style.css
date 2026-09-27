@@ -178,6 +178,35 @@ h2 {
 .card.locked { opacity: 0.42; }
 .card.done { border-left: 2px solid var(--accent); }
 
+/* Card grids. Without this a card is as wide as the window, and a row that
+   justifies to space-between throws its button a metre from its select. */
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+/* Controls sit together at the left of their row, not at opposite edges. */
+.card .row.controls { justify-content: flex-start; flex-wrap: wrap; }
+
+/* Selects are the only native control in the UI, and left alone they arrive
+   as a white Chromium widget in the middle of a dark panel. */
+select {
+  font: inherit;
+  font-size: var(--label);
+  letter-spacing: var(--track);
+  color: var(--bone);
+  background: var(--void);
+  border: 1px solid var(--panel-edge);
+  padding: 7px 10px;
+  max-width: 100%;
+  appearance: none;
+  cursor: pointer;
+}
+select:hover { border-color: var(--dust); }
+select:focus-visible { outline: 1px solid var(--accent); outline-offset: 1px; }
+select option { background: var(--void); color: var(--bone); }
+
 .pill {
   font-size: 9px;
   letter-spacing: 0.16em;

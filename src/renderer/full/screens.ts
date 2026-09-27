@@ -1,5 +1,6 @@
 /**
- * The docked screens: system map, route, hold, tech, ship, codex, settings.
+ * The docked screens: system map, route, loadout, hold, tech, ship, codex,
+ * settings.
  *
  * Presentation only. Every mutation goes out as a named command and comes back
  * as a fresh catalog — the renderer holds no authoritative state, which is what
@@ -9,7 +10,7 @@ import { formatDuration, formatNumber } from '../../sim/numbers.js';
 import type { FullSnapshot } from '../../sim/snapshot.js';
 import { api } from './api.js';
 
-export type ScreenId = 'map' | 'route' | 'hold' | 'tech' | 'ship' | 'codex' | 'settings';
+export type ScreenId = 'map' | 'route' | 'loadout' | 'hold' | 'tech' | 'ship' | 'codex' | 'settings';
 
 interface Ctx {
   snap: FullSnapshot;
@@ -108,6 +109,93 @@ const SCREENS: Record<ScreenId, (ctx: Ctx) => string> = {
           <div class="meta" id="parity-out"></div>
         </div>
       </div>`;
+  },
+
+  /**
+   * The three weapons you actually carry.
+   *
+   * The Hold is a warehouse: every weapon you own, sortable, scrappable, with
+   * an Equip button that silently drops the item into whichever slot happens
+   * to be active. That is a fine warehouse and a terrible loadout — you could
+   * not see your three side by side, and you could not choose *which* slot
+   * anything went to, because the button never sent one. The command always
+   * accepted a slot. Nothing ever passed it.
+   *
+   * So: one card per slot, what is in it, what it does, and a picker that
+   * targets that slot and no other. The verb line matters more than the DPS
+   * line. Three weapons is a choice about coverage — armour, crowds, range —
+   * and a column of numbers cannot show you a gap in it.
+   */
+  loadout: (ctx) => {
+    const items = (ctx.catalog.inventory ?? []) as any[];
+    const loadout = (ctx.catalog.loadout ?? [null, null, null]) as (number | null)[];
+    const activeSlot = Number(ctx.catalog.activeSlot ?? 0);
+    const rarities = ctx.content.rarities as Record<string, any>;
+    const verbs = (ctx.content.verbs ?? {}) as Record<string, string>;
+    const labels = ctx.content.damageLabels as Record<string, string>;
+    const byUid = new Map<number, any>(items.map((i) => [i.uid, i]));
+
+    const cards = [0, 1, 2]
+      .map((slot) => {
+        const uid = loadout[slot] ?? null;
+        const item = uid === null ? undefined : byUid.get(uid);
+        const color = item ? (rarities[item.rarity]?.color ?? '#e9decb') : '#6b6459';
+        // A weapon already in another slot is not offered here: carrying the
+        // same gun twice is never the answer and the list is long enough.
+        const options = items
+          .filter((i) => i.equipped < 0 || i.equipped === slot)
+          .sort((a, b) => b.power - a.power)
+          .map(
+            (i) =>
+              `<option value="${i.uid}"${i.uid === uid ? ' selected' : ''}>` +
+              `${esc(i.name)} — ilvl ${i.ilvl}, ${fmt(i.dps, ctx.snap.notation)} dps</option>`,
+          )
+          .join('');
+
+        return `
+        <div class="card ${slot === activeSlot ? 'done' : ''}">
+          <div class="row">
+            <span class="title">Slot ${slot + 1}</span>
+            ${slot === activeSlot ? '<span class="pill">In hand</span>' : ''}
+            <span style="flex:1"></span>
+            <span class="meta">key ${slot + 1}</span>
+          </div>
+          <div class="row" style="margin-top:6px">
+            <span class="title" style="color:${color}">${item ? esc(item.name) : 'Empty'}</span>
+            ${item?.signature ? '<span class="pill" style="color:var(--accent);margin-left:6px">Signature</span>' : ''}
+          </div>
+          <div class="meta">${
+            item
+              ? `<strong>${esc(verbs[item.archetypeId] ?? '—')}</strong> · ${esc(labels[item.damageType] ?? item.damageType)} · ilvl ${item.ilvl} · ${fmt(item.dps, ctx.snap.notation)} dps`
+              : 'Nothing assigned. This slot does nothing when you press its key.'
+          }</div>
+          <div class="meta">${item ? (item.affixes.map((a: any) => esc(a.label)).join(' · ') || 'No affixes.') : ''}</div>
+          <div class="row controls" style="margin-top:8px">
+            <select data-equip-slot="${slot}">
+              <option value="">— empty —</option>
+              ${options}
+            </select>
+            <button data-cmd="swap-slot" data-slot="${slot}" ${slot === activeSlot ? 'disabled' : ''}>Take in hand</button>
+          </div>
+        </div>`;
+      })
+      .join('');
+
+    const carried = loadout.filter((u) => u !== null).length;
+    const types = new Set(
+      loadout.map((u) => (u === null ? null : byUid.get(u)?.damageType)).filter(Boolean),
+    );
+    const gap =
+      carried < 3
+        ? `${3 - carried} slot${carried === 2 ? '' : 's'} empty.`
+        : types.size < 2
+          ? 'All three deal the same damage type. Something out there resists it.'
+          : 'Three types covered.';
+
+    return `
+      <h2>Loadout</h2>
+      <p class="blurb">What you carry planetside. <code>1</code>, <code>2</code> and <code>3</code> swap between them on the ground. ${esc(gap)}</p>
+      <div class="cards">${cards}</div>`;
   },
 
   hold: (ctx) => {
@@ -301,11 +389,27 @@ function wire(root: HTMLElement, ctx: Ctx): void {
       if (btn.dataset.zone) payload.zoneId = btn.dataset.zone;
       if (btn.dataset.uid) payload.uid = Number(btn.dataset.uid);
       if (btn.dataset.id) payload.id = btn.dataset.id;
+      if (btn.dataset.slot) payload.slot = Number(btn.dataset.slot);
       const result = await api.command(cmd, payload);
       if (cmd === 'parity-check') {
         const out = root.querySelector('#parity-out');
         if (out) out.textContent = result.message;
       }
+      if (result.message) ctx.notify(result.message);
+      ctx.refresh();
+    });
+  });
+
+  // The loadout pickers target a specific slot, which is the whole reason the
+  // screen exists; `equip` has always taken one, and nothing ever sent it.
+  root.querySelectorAll<HTMLSelectElement>('select[data-equip-slot]').forEach((el) => {
+    el.addEventListener('change', async () => {
+      const slot = Number(el.dataset.equipSlot);
+      const uid = el.value === '' ? null : Number(el.value);
+      const result =
+        uid === null
+          ? await api.command('unequip', { slot })
+          : await api.command('equip', { uid, slot });
       if (result.message) ctx.notify(result.message);
       ctx.refresh();
     });

@@ -8,7 +8,7 @@
 import { derive, resolveWeapon } from '../sim/derive.js';
 import { assertParity } from '../sim/offline.js';
 import { assignRoute, canAssignRoute, clearRoute, planCycle } from '../sim/route.js';
-import { doPrestige, landInZoneChecked, requestBoss, returnToShip, canPrestige, prestigeGain, travelCostFor } from '../sim/sim.js';
+import { doPrestige, landInZoneChecked, requestBoss, returnToShip, reviveInZone, canPrestige, prestigeGain, travelCostFor } from '../sim/sim.js';
 import { breakdownValue, itemPower } from '../sim/loot.js';
 import { addMaterials, findItem, type Settings } from '../sim/state.js';
 import { getTech, techAvailable, TECH_NODES } from '../sim/content/tech.js';
@@ -19,10 +19,12 @@ import type { SimHost } from './simhost.js';
 export type CommandName =
   | 'land'
   | 'return-to-ship'
+  | 'revive'
   | 'summon-boss'
   | 'assign-route'
   | 'clear-route'
   | 'equip'
+  | 'unequip'
   | 'swap-slot'
   | 'breakdown'
   | 'toggle-lock'
@@ -61,6 +63,14 @@ export function runCommand(host: SimHost, name: CommandName, payload: Record<str
       return ok('Docked.');
     }
 
+    case 'revive': {
+      if (!session.arena) return no('You are not planetside.');
+      if (session.arena.outcome !== 'down') return no('Nothing to get up from.');
+      if (!reviveInZone(session)) return no('Could not get up.');
+      host.invalidate();
+      return ok('On your feet.');
+    }
+
     case 'summon-boss': {
       if (!requestBoss(session)) return no('The beacon is not answering yet.');
       return ok('The beacon answers.');
@@ -89,6 +99,15 @@ export function runCommand(host: SimHost, name: CommandName, payload: Record<str
       state.player.loadout[slot] = uid;
       host.invalidate();
       return ok('Equipped.');
+    }
+
+    case 'unequip': {
+      const slot = Number(payload.slot);
+      if (slot < 0 || slot > 2) return no('No such slot.');
+      if (state.player.loadout[slot] == null) return ok('');
+      state.player.loadout[slot] = null;
+      host.invalidate();
+      return ok('Slot cleared.');
     }
 
     case 'swap-slot': {

@@ -17,6 +17,15 @@ import { animateActor, buildHostile, buildPlayer, disposeActor, type Actor } fro
 import { aimAngles, convergeDistance, solveRig, type RigTarget } from './rig.js';
 import { DAMAGE_COLOR, Fx } from './fx.js';
 
+/** Mirrors `RARITY` in `src/sim/content/items.ts`. Colour is the whole point. */
+const RARITY_HEX: Record<string, number> = {
+  common: 0x8d8577,
+  refined: 0xc9b98f,
+  marked: 0xc98f4a,
+  relic: 0x9c5f7a,
+  sovereign: 0xd8d2c4,
+};
+
 const SHADOW_SIZE = 2048;
 /** Low in the sky. Everything the direction promises comes from this angle. */
 const SUN_DIR = new THREE.Vector3(-0.58, 0.235, -0.78).normalize();
@@ -65,6 +74,7 @@ export class Scene3D {
   private telegraphPool: THREE.Mesh[] = [];
   private projectiles: THREE.Mesh[] = [];
   private hazardMeshes: THREE.Mesh[] = [];
+  private dropMeshes: THREE.Object3D[] = [];
   private depositMeshes: THREE.Object3D[] = [];
   private scanMeshes: THREE.Object3D[] = [];
   private beam: THREE.Mesh;
@@ -461,6 +471,7 @@ export class Scene3D {
     this.syncTelegraphs(snap);
     this.syncProjectiles(snap);
     this.syncHazards(snap);
+    this.syncDrops(snap, timeMs);
     this.syncPickups(snap);
     this.syncBeam(snap, player);
 
@@ -498,9 +509,10 @@ export class Scene3D {
     return { x: v.x, y: v.y, z: v.z };
   }
 
-  /** Camera height and how visible the player is, for the same harness. */
-  probe(): { camY: number; playerOpacity: number } {
-    return { camY: this.camera.position.y, playerOpacity: this.playerOpacity };
+  /** Camera placement and how visible the player is, for the same harness. */
+  probe(): { cam: { x: number; y: number; z: number }; camY: number; playerOpacity: number } {
+    const c = this.camera.position;
+    return { cam: { x: c.x, y: c.y, z: c.z }, camY: c.y, playerOpacity: this.playerOpacity };
   }
 
   /* -------------------------------- actors ------------------------------- */
@@ -678,6 +690,87 @@ export class Scene3D {
       m.scale.setScalar(h.radius * (0.6 + h.life * 0.4));
       (m.material as THREE.MeshBasicMaterial).color.setHex(DAMAGE_COLOR[h.type] ?? 0xff8a3a);
       (m.material as THREE.MeshBasicMaterial).opacity = 0.12 + h.life * 0.26;
+    }
+  }
+
+  /**
+   * Loot on the sand.
+   *
+   * A weapon that appears as a line of text in a list is a spreadsheet entry.
+   * One that is thrown off the body, glints on the ground and flies at you
+   * when you walk near is a reward. Same item, same roll, same instant it
+   * became yours — the difference is entirely here.
+   *
+   * A shard plus a column of light, because at 130 units the shard alone is
+   * four pixels and a colour you cannot read. The column is what you see from
+   * across the terrace; the shard is what you see when you arrive.
+   */
+  private syncDrops(snap: ArenaSnapshot, timeMs: number): void {
+    while (this.dropMeshes.length < snap.drops.length) {
+      const g = new THREE.Object3D();
+
+      // A ring on the sand. This is the part that actually finds the loot:
+      // it sits on the ground plane, so it reads against the ground at any
+      // distance and from any angle, which a thin vertical shape does not.
+      const ring = new THREE.Mesh(
+        new THREE.RingGeometry(9, 15, 24),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.8, side: THREE.DoubleSide, depthWrite: false, fog: false }),
+      );
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.y = 1.5;
+      g.add(ring);
+
+      const shard = new THREE.Mesh(
+        new THREE.OctahedronGeometry(8),
+        new THREE.MeshLambertMaterial({ color: 0xffffff, emissive: 0xffffff, emissiveIntensity: 1.1 }),
+      );
+      g.add(shard);
+
+      // A shaft of light above it, for spotting one across the terrace.
+      // Normal blending, not additive: additive light over bright sand is
+      // arithmetic that cancels out, and the beacon disappears exactly where
+      // every piece of loot in the game lies.
+      const beam = new THREE.Mesh(
+        new THREE.CylinderGeometry(1.6, 6, 165, 10, 1, true),
+        new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.3, depthWrite: false, side: THREE.DoubleSide, fog: false }),
+      );
+      beam.position.y = 82;
+      g.add(beam);
+
+      g.userData = { ring, shard, beam };
+      this.scene.add(g);
+      this.dropMeshes.push(g);
+    }
+
+    for (let i = 0; i < this.dropMeshes.length; i++) {
+      const g = this.dropMeshes[i]!;
+      const d = snap.drops[i];
+      if (!d) {
+        g.visible = false;
+        continue;
+      }
+      g.visible = true;
+      g.position.set(d.x, 0, d.z);
+      const { ring, shard, beam } = g.userData as { ring: THREE.Mesh; shard: THREE.Mesh; beam: THREE.Mesh };
+
+      shard.position.y = d.y + Math.sin(timeMs * 0.003 + i) * 2.4;
+      shard.rotation.y = timeMs * 0.0022 + i;
+      shard.rotation.x = Math.sin(timeMs * 0.0016 + i) * 0.35;
+
+      const hex = RARITY_HEX[d.rarity] ?? 0xc9b98f;
+      (shard.material as THREE.MeshLambertMaterial).color.setHex(hex);
+      (shard.material as THREE.MeshLambertMaterial).emissive.setHex(hex);
+      (ring.material as THREE.MeshBasicMaterial).color.setHex(hex);
+      (beam.material as THREE.MeshBasicMaterial).color.setHex(hex);
+
+      // Brightest as it lands, so a new drop announces itself, then settles
+      // to a marker still findable two minutes later.
+      const fresh = Math.max(0, 1 - d.age / 90);
+      const pulse = 0.82 + Math.sin(timeMs * 0.005 + i) * 0.18;
+      (ring.material as THREE.MeshBasicMaterial).opacity = (0.5 + fresh * 0.4) * pulse;
+      (beam.material as THREE.MeshBasicMaterial).opacity = (0.16 + fresh * 0.26) * pulse;
+      (shard.material as THREE.MeshLambertMaterial).emissiveIntensity = 0.9 + fresh * 1.5;
+      ring.scale.setScalar(1 + fresh * 0.45);
     }
   }
 

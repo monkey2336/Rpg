@@ -52,6 +52,15 @@ const DODGE_IFRAMES = 12;
 const DODGE_COOLDOWN = 34;
 const DODGE_SPEED = 9.5;
 const MAX_ADDS = 14;
+/** Close enough that a drop starts flying to you rather than waiting. */
+const DROP_MAGNET = 190;
+/** Close enough to have it. */
+const DROP_PICKUP = 34;
+const DROP_GRAVITY = 0.55;
+/** Two seconds of grace after standing up. */
+const REVIVE_IFRAMES = 80;
+/** Nothing hostile stands closer than this to a player getting up. */
+const REVIVE_CLEARANCE = 190;
 /** The Warden holds its terrace rather than chasing the player to the rim. */
 const BOSS_LEASH = 430;
 
@@ -74,6 +83,9 @@ export type ArenaEventType =
   | 'boss-down'
   | 'mined'
   | 'scanned'
+  | 'drop'
+  | 'pickup'
+  | 'revive'
   | 'gate';
 
 export interface ArenaEvent {
@@ -141,6 +153,35 @@ export interface PlayerRuntime {
   wasFiring: boolean;
 }
 
+/**
+ * A weapon lying where its owner fell.
+ *
+ * The arena knows a drop's position, its rarity and nothing else — not what
+ * the weapon is, not what it rolls for, not whether the hold has room. That
+ * stays in `sim.ts`, so the arena remains an encounter sim with no opinion
+ * about inventories.
+ *
+ * Ownership is not in question at any point: `sim.ts` banks the item the
+ * instant the kill lands, exactly as it always did. This is the part you can
+ * see. Walking over it is how the game tells you what you got and when, not a
+ * condition for getting it — a run that ends with drops still on the sand
+ * collects them anyway. Loot you have to scramble for before a timer is a
+ * different game, and a worse one.
+ */
+export interface ArenaDrop {
+  /** Matches the banked item's uid, so `sim.ts` can name it on pickup. */
+  uid: number;
+  x: number;
+  y: number;
+  z: number;
+  vy: number;
+  /** Colour only. The arena does not know what rarity means. */
+  rarity: string;
+  /** Ticks since it landed, for the glint. */
+  age: number;
+  taken: boolean;
+}
+
 export interface ArenaState {
   zoneId: string;
   tick: number;
@@ -151,6 +192,7 @@ export interface ArenaState {
   hazards: import('./types.js').Hazard[];
   deposits: Deposit[];
   scans: ScanSite[];
+  drops: ArenaDrop[];
   player: PlayerRuntime;
   nextId: number;
   waveTimer: number;
@@ -304,6 +346,7 @@ export function createArena(zoneId: string, seed: number, playerDefences: Defenc
     hazards: [],
     deposits: [],
     scans: [],
+    drops: [],
     player: {
       entityId: 0,
       ammo: 0,
@@ -455,6 +498,64 @@ function spawnWave(a: ArenaState): void {
  * the fight's difficulty depends on how chewed up the approach left you, nobody
  * can learn it, and learning it is the whole point.
  */
+/**
+ * Puts a downed player back on their feet without discarding the approach.
+ *
+ * Landing again used to be the only option, and it built a fresh arena: kills,
+ * deposits and scans all back to zero, and another crossing's fuel charged for
+ * the privilege. Dying at 20 of 24 kills meant redoing the whole ninety
+ * seconds, which is not difficulty, it is a tax on having been nearly there.
+ *
+ * A boss on the field is the one exception, and for the reason `summonBoss`
+ * already gives: a set-piece has to start from a known state or nobody can
+ * learn it. So the boss withdraws and the approach stays cleared — you replay
+ * the fight, not the grind that unlocked it.
+ */
+export function revivePlayer(a: ArenaState, def: Defences): boolean {
+  const p = playerEntity(a);
+  if (a.outcome !== 'down') return false;
+
+  if (a.bossSpawned) {
+    for (const e of a.entities) {
+      if (e.faction === 'hostile') e.dead = true;
+    }
+    a.bossSpawned = false;
+    a.bossEntityId = -1;
+    a.wavesSpawned = 0;
+  }
+
+  p.dead = false;
+  p.def = { ...def };
+  // Long enough to get oriented, and to stop a revive landing straight back
+  // in the attack that did it.
+  p.iframes = REVIVE_IFRAMES;
+  p.stunned = 0;
+  p.statuses.length = 0;
+  a.outcome = 'running';
+  a.hitstop = 0;
+
+  // Nothing already in the air may land on a player who has just stood up.
+  a.projectiles = a.projectiles.filter((pr) => pr.faction !== 'hostile');
+  a.telegraphs.length = 0;
+
+  // Shove anything standing over the body back to arm's length.
+  for (const e of a.entities) {
+    if (e.faction !== 'hostile' || e.dead) continue;
+    const dx = e.x - p.x;
+    const dz = e.z - p.z;
+    const d = Math.sqrt(dx * dx + dz * dz);
+    if (d >= REVIVE_CLEARANCE) continue;
+    const ang = d > 0.01 ? atan2(dz, dx) : nextRange(a.rng, 0, TAU);
+    e.x = p.x + cos(ang) * REVIVE_CLEARANCE;
+    e.z = p.z + sin(ang) * REVIVE_CLEARANCE;
+    clampToArena(e);
+  }
+
+  a.waveTimer = Math.max(a.waveTimer, 120);
+  emit(a, { type: 'revive', x: p.x, y: p.y, z: p.z, id: p.id });
+  return true;
+}
+
 export function summonBoss(a: ArenaState): boolean {
   const zone = getZone(a.zoneId);
   if (!zone.bossId || a.bossSpawned || !a.gateMet) return false;
@@ -1357,6 +1458,61 @@ export interface StepContext {
 
 const INTERACT_RANGE = 46;
 
+/**
+ * Spawns the visible half of a drop. `sim.ts` has already banked the item.
+ *
+ * The toss is deterministic — it draws from the arena's own rng like every
+ * other scatter — so a replayed seed throws the same loot to the same patch
+ * of sand.
+ */
+export function spawnDrop(a: ArenaState, uid: number, rarity: string, x: number, y: number, z: number): void {
+  const ang = nextRange(a.rng, 0, TAU);
+  const spread = nextRange(a.rng, 6, 26);
+  a.drops.push({
+    uid,
+    x: x + cos(ang) * spread,
+    y: Math.max(y, 12),
+    z: z + sin(ang) * spread,
+    vy: nextRange(a.rng, 1.4, 3.2),
+    rarity,
+    age: 0,
+    taken: false,
+  });
+  a.drops.length = Math.min(a.drops.length, 64);
+}
+
+/** Falls, then comes to you. Emits `pickup` carrying the uid as its text. */
+function stepDrops(a: ArenaState, p: Entity): void {
+  for (let i = a.drops.length - 1; i >= 0; i--) {
+    const d = a.drops[i]!;
+    d.age += 1;
+
+    const dx = p.x - d.x;
+    const dz = p.z - d.z;
+    const flat = Math.sqrt(dx * dx + dz * dz);
+
+    if (flat < DROP_MAGNET && !p.dead) {
+      // Accelerates as it closes, so the last stretch snaps rather than
+      // drifting. The pull beats the player's own top speed, so backing away
+      // from your own loot is not a way to lose it.
+      const pull = 2.2 + (1 - flat / DROP_MAGNET) * 9;
+      d.x += (dx / Math.max(flat, 0.001)) * pull;
+      d.z += (dz / Math.max(flat, 0.001)) * pull;
+      d.y += (p.y + p.height * 0.45 - d.y) * 0.18;
+    } else {
+      d.vy -= DROP_GRAVITY;
+      d.y = Math.max(8, d.y + d.vy);
+      if (d.y <= 8) d.vy = 0;
+    }
+
+    if (flat < DROP_PICKUP && !p.dead) {
+      d.taken = true;
+      emit(a, { type: 'pickup', x: d.x, y: d.y, z: d.z, id: d.uid, text: String(d.uid) });
+      a.drops.splice(i, 1);
+    }
+  }
+}
+
 export function stepArena(a: ArenaState, input: InputFrame, ctx: StepContext): ArenaEvent[] {
   a.events = [];
   if (a.outcome !== 'running') return a.events;
@@ -1641,6 +1797,8 @@ export function stepArena(a: ArenaState, input: InputFrame, ctx: StepContext): A
       a.telegraphs.splice(i, 1);
     }
   }
+
+  stepDrops(a, p);
 
   // --- waves and the boss gate ---
   if (!a.bossSpawned) {

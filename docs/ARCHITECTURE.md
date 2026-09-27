@@ -352,6 +352,45 @@ simulation would not have caught 0.1.0 at all: the aim it received was
 
 ---
 
+## 5d-iii. Loot you can see, and a death you can come back from
+
+Two rules, both added because play found them rather than tests.
+
+**A drop is owned the instant the kill lands.** `sim.ts` rolls the weapon and
+pushes it into the hold exactly as it always did; `spawnDrop` then puts a
+marker on the sand where the body fell. The marker falls, glints, and flies to
+the player inside `DROP_MAGNET`. Walking over it is how the game *shows* you
+what you got and when — the "Recovered" notice waits for that moment instead of
+firing from across the terrace — but it is never a condition for keeping it. A
+run that ends with loot still on the ground collects it anyway, on every exit
+path: cleared, docked, or landing somewhere else. Loot you have to scramble for
+before a timer is a different game and a worse one, and it would sit badly
+beside "zero save loss, ever".
+
+The split holds the layer boundary: the arena knows a drop's position and its
+rarity, because rarity is a colour. It does not know what the weapon is, what
+it rolls, or whether the hold has room.
+
+**Dying costs the fight, not the approach.** Landing again used to build a
+fresh arena — kills, deposits and scans back to zero, and the crossing's fuel
+charged a second time. Dying at 20 of 24 kills meant redoing the whole ninety
+seconds, which is a tax on nearly making it rather than difficulty, and it is
+what "I am unable to clear an area" actually meant. `revivePlayer` now stands
+the player up where they fell with the gate progress intact, full defences,
+two seconds of grace, hostile ordnance cleared from the air and anything
+standing over the body shoved to arm's length.
+
+The one exception is a boss on the field, and it follows the rule `summonBoss`
+already states: a set-piece has to start from a known state or nobody can learn
+it. So the boss withdraws, the gate stays met, and the player replays the fight
+without replaying the grind that unlocked it.
+
+> Enforced by `test/run-recovery.test.ts` — gate progress across a death, the
+> boss withdrawing while the gate holds, the air being cleared, and the drop
+> lifecycle from spawn through magnet to pickup.
+
+---
+
 ## 5e. The boss pipeline
 
 A boss is data. `BossDef` carries its geometry, defences, weak points and phases;
